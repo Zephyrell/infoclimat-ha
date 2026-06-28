@@ -1,0 +1,7 @@
+{
+  "name": "Infoclimat Scraper",
+  "content_in_root": false,
+  "render_readme": true,
+  "domains": ["infoclimat"],
+  "iot_class": "cloud_polling"
+}
