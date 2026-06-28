@@ -1,10 +1,10 @@
 {
   "domain": "infoclimat",
   "name": "Infoclimat Scraper",
-  "codeowners": ["@clement"],
+  "codeowners": ["@Zephyrell"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/clement/infoclimat-ha",
+  "documentation": "https://github.com/Zephyrell/infoclimat-ha",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "requirements": [],
