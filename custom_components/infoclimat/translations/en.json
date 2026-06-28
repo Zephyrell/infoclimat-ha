@@ -1,0 +1,17 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Infoclimat Station",
+        "description": "Configure the Infoclimat weather station to monitor.",
+        "data": {
+          "station_id": "Station ID",
+          "scan_interval": "Update interval (minutes)"
+        }
+      }
+    },
+    "error": {
+      "unknown": "Unexpected error"
+    }
+  }
+}
