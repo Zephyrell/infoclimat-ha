@@ -18,7 +18,6 @@ couvertes par la station synoptique Météo-France la plus proche.
 | Vent moyen | `wind_speed` | km/h | ✅ |
 | Rafale de vent | — | km/h | ✅ |
 | Direction du vent | — | ° | ✅ |
-| Pluie (1h) | `precipitation` | mm/h | ✅ |
 | Point de rosée | `temperature` | °C | ✅ |
 | Bio-météo (ressentie) | — | — | ✅ |
 | Pression | `pressure` | hPa | ✅ |

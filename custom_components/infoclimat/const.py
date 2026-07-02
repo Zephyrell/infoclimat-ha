@@ -65,13 +65,6 @@ SENSOR_TYPES = {
         "icon": "mdi:compass",
         "enabled": True,
     },
-    "pluie_1h": {
-        "name": "Pluie (1h)",
-        "device_class": "precipitation",
-        "unit": UnitOfVolumetricFlux.MILLIMETERS_PER_HOUR,
-        "icon": None,
-        "enabled": True,
-    },
     "point_rosee": {
         "name": "Point de rosée",
         "device_class": "temperature",

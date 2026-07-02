@@ -116,17 +116,14 @@ def parse_observations(html_text: str) -> dict | None:
     if m:
         obs["date"] = f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
 
-    # Colonnes de données
+    # Colonnes de données (Infoclimat a supprimé la colonne pluie 1h,
+    # les index sont donc décalés par rapport aux versions < 2026)
     obs["temperature"] = _extract_number(tds[1][1])
-    r = _strip_tags(tds[2][1])
-    rn = _extract_number(tds[2][1])
-    if r and rn is not None:
-        obs["pluie_1h"] = rn
-    _parse_wind(tds[3][1], obs)
-    obs["humidite"] = _extract_number(tds[4][1])
-    obs["bio_meteo"] = _extract_number(tds[5][1])
-    obs["point_rosee"] = _extract_number(tds[6][1])
-    _parse_pressure(tds[7][1], obs)
+    _parse_wind(tds[2][1], obs)
+    obs["humidite"] = _extract_number(tds[3][1])
+    obs["bio_meteo"] = _extract_number(tds[4][1])
+    obs["point_rosee"] = _extract_number(tds[5][1])
+    _parse_pressure(tds[6][1], obs)
 
     # Nom station
     m = re.search(r"<h1[^>]*>(.*?)</h1>", html_text, re.DOTALL)
