@@ -99,8 +99,8 @@ def parse_observations(html_text: str) -> dict | None:
 
     # Première ligne = données les plus récentes
     tds = re.findall(r"<(t[dh])[^>]*>(.*?)</\1>", rows[0], re.DOTALL)
-    if len(tds) < 8:
-        _LOGGER.warning("Nombre de colonnes inattendu: %d (attendu: ≥8)", len(tds))
+    if len(tds) < 7:
+        _LOGGER.warning("Nombre de colonnes inattendu: %d (attendu: ≥7)", len(tds))
         return None
 
     obs: dict = {}
