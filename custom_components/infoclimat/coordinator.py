@@ -82,14 +82,25 @@ def _parse_climato(text: str, obs: dict):
 
 
 def parse_observations(html_text: str) -> dict | None:
-    """Parse la page Infoclimat et retourne les observations les plus récentes."""
+    """Parse la page Infoclimat et retourne les observations les plus récentes.
+
+    Le tableau a maintenant un format responsive :
+    - Ligne complète = 9 colonnes : heure, temp, icône, pluie, vent,
+      humidité, bio-météo, rosée, pression
+    - Quand il pleut, des lignes de détail (5 colonnes) s'intercalent
+    On cherche la 1re ligne à 9 colonnes (la plus récente complète).
+    """
+    # Extraction via </tbody> pour éviter les <table> imbriqués
+    # dans les tooltips (colonne pluie)
     table = re.search(
-        r'<table[^>]*id="resptable-releves"[^>]*>.*?<tbody>(.*?)</tbody>',
+        r"<table[^>]*id=\"resptable-releves\"[^>]*>"
+        r".*?<thead>.*?</thead>"
+        r".*?<tbody>(.*?)</tbody>",
         html_text,
         re.DOTALL,
     )
     if not table:
-        _LOGGER.error("Table #resptable-releves non trouvée dans la page")
+        _LOGGER.error("Table #resptable-releves/tbody non trouvée dans la page")
         return None
 
     rows = re.findall(r"<tr[^>]*>(.*?)</tr>", table.group(1), re.DOTALL)
@@ -97,15 +108,21 @@ def parse_observations(html_text: str) -> dict | None:
         _LOGGER.error("Aucune ligne trouvée dans le tableau")
         return None
 
-    # Première ligne = données les plus récentes
-    tds = re.findall(r"<(t[dh])[^>]*>(.*?)</\1>", rows[0], re.DOTALL)
-    if len(tds) < 7:
-        _LOGGER.warning("Nombre de colonnes inattendu: %d (attendu: ≥7)", len(tds))
+    # Chercher la 1re ligne avec 9 colonnes (format complet)
+    tds = None
+    for row in rows:
+        cells = re.findall(r"<(t[dh])[^>]*>(.*?)</\1>", row, re.DOTALL)
+        if len(cells) == 9:
+            tds = cells
+            break
+
+    if not tds:
+        _LOGGER.warning("Aucune ligne de données complète (9 colonnes) trouvée")
         return None
 
     obs: dict = {}
 
-    # Heure locale
+    # Heure locale (colonne 0 - <th>)
     m = re.search(r">(\d{1,2}h\d{2})</span>", tds[0][1])
     if m:
         obs["heure_locale"] = m.group(1)
@@ -116,14 +133,16 @@ def parse_observations(html_text: str) -> dict | None:
     if m:
         obs["date"] = f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
 
-    # Colonnes de données (Infoclimat a supprimé la colonne pluie 1h,
-    # les index sont donc décalés par rapport aux versions < 2026)
+    # Colonnes de données (nouveau format responsive 9 colonnes)
+    #  0: heure (th) | 1: temp | 2: icône | 3: pluie 1h | 4: vent
+    #  5: humidité   | 6: bio   | 7: rosée | 8: pression
     obs["temperature"] = _extract_number(tds[1][1])
-    _parse_wind(tds[2][1], obs)
-    obs["humidite"] = _extract_number(tds[3][1])
-    obs["bio_meteo"] = _extract_number(tds[4][1])
-    obs["point_rosee"] = _extract_number(tds[5][1])
-    _parse_pressure(tds[6][1], obs)
+    obs["pluie_1h"] = _extract_number(tds[3][1])
+    _parse_wind(tds[4][1], obs)
+    obs["humidite"] = _extract_number(tds[5][1])
+    obs["bio_meteo"] = _extract_number(tds[6][1])
+    obs["point_rosee"] = _extract_number(tds[7][1])
+    _parse_pressure(tds[8][1], obs)
 
     # Nom station
     m = re.search(r"<h1[^>]*>(.*?)</h1>", html_text, re.DOTALL)

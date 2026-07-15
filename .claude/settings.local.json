@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:www.infoclimat.fr)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:forums.infoclimat.fr)",
+      "WebFetch(domain:weatherlink.github.io)",
+      "Bash(curl -s \"https://www.infoclimat.fr/observations-meteo/temps-reel/saint-paul-trois-chateaux/000FU.html\")",
+      "Bash(curl -s \"//static.infoclimat.net/include/js/general.js?v5.2.10\")",
+      "Bash(curl -sI \"https://static.infoclimat.net/observations/observationsV2/jour/000FU\")",
+      "Bash(curl -s \"https://static.infoclimat.net/observations/observationsV2/jour/000FU\")",
+      "Bash(curl -s \"https://static.infoclimat.net/include/js/autoprevi.js?v527.js\")",
+      "Bash(curl -s \"https://static.infoclimat.net/include/js/general.js?v5.2.10\")",
+      "Bash(curl -s \"https://www.infoclimat.fr/opendata/?method=get&format=json&start=2026-06-28&end=2026-06-28&stations[]=000FU\"``)",
+      "Bash(curl -sL \"https://www.infoclimat.fr/observations-meteo/temps-reel/saint-paul-trois-chateaux/000FU.html\" -o /tmp/infoclimat_latest.html)",
+      "Read(//tmp/**)",
+      "Bash(python3 test_scraper.py)",
+      "Bash(python3 *)",
+      "Bash(git init *)",
+      "Bash(gh auth *)",
+      "Bash(git pull *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git tag *)"
+    ]
+  }
+}
