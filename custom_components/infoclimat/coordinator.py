@@ -81,14 +81,64 @@ def _parse_climato(text: str, obs: dict):
         obs["dju_froid"] = int(m.group(1))
 
 
+def _parse_data_row(tds: list, obs: dict, num_cols: int):
+    """Parse les colonnes de données selon le format détecté.
+
+    Formats historiques rencontrés sur Infoclimat :
+    - 9 colonnes : heure, temp, icône_temps, pluie, vent, hum, bio, rosée, pression
+    - 8 colonnes : heure, temp, pluie, vent, hum, bio, rosée, pression
+    - 7 colonnes : heure, temp, vent, hum, bio, rosée, pression (pluie absente)
+    """
+    if num_cols == 9:
+        # 0: heure | 1: temp | 2: icône | 3: pluie | 4: vent
+        # 5: hum   | 6: bio   | 7: rosée | 8: pression
+        obs["temperature"] = _extract_number(tds[1][1])
+        obs["pluie_1h"] = _extract_number(tds[3][1])
+        _parse_wind(tds[4][1], obs)
+        obs["humidite"] = _extract_number(tds[5][1])
+        obs["bio_meteo"] = _extract_number(tds[6][1])
+        obs["point_rosee"] = _extract_number(tds[7][1])
+        _parse_pressure(tds[8][1], obs)
+    elif num_cols == 8:
+        # 0: heure | 1: temp | 2: pluie | 3: vent
+        # 4: hum   | 5: bio   | 6: rosée | 7: pression
+        obs["temperature"] = _extract_number(tds[1][1])
+        obs["pluie_1h"] = _extract_number(tds[2][1])
+        _parse_wind(tds[3][1], obs)
+        obs["humidite"] = _extract_number(tds[4][1])
+        obs["bio_meteo"] = _extract_number(tds[5][1])
+        obs["point_rosee"] = _extract_number(tds[6][1])
+        _parse_pressure(tds[7][1], obs)
+    elif num_cols == 7:
+        # 0: heure | 1: temp | 2: vent
+        # 3: hum   | 4: bio   | 5: rosée | 6: pression
+        obs["temperature"] = _extract_number(tds[1][1])
+        _parse_wind(tds[2][1], obs)
+        obs["humidite"] = _extract_number(tds[3][1])
+        obs["bio_meteo"] = _extract_number(tds[4][1])
+        obs["point_rosee"] = _extract_number(tds[5][1])
+        _parse_pressure(tds[6][1], obs)
+
+
+def _parse_time(td_html: str, obs: dict):
+    """Extraction heure locale, UTC et date depuis la colonne heure."""
+    m = re.search(r">(\d{1,2}h\d{2})</span>", td_html)
+    if m:
+        obs["heure_locale"] = m.group(1)
+    m = re.search(r"(\d{2})h(\d{2})\s*UTC", td_html)
+    if m:
+        obs["heure_utc"] = f"{m.group(1)}:{m.group(2)}"
+    m = re.search(r"(\d{2})/(\d{2})/(\d{4})", td_html)
+    if m:
+        obs["date"] = f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+
+
 def parse_observations(html_text: str) -> dict | None:
     """Parse la page Infoclimat et retourne les observations les plus récentes.
 
-    Le tableau a maintenant un format responsive :
-    - Ligne complète = 9 colonnes : heure, temp, icône, pluie, vent,
-      humidité, bio-météo, rosée, pression
-    - Quand il pleut, des lignes de détail (5 colonnes) s'intercalent
-    On cherche la 1re ligne à 9 colonnes (la plus récente complète).
+    Le tableau responsive change régulièrement de format. Cette fonction
+    détecte automatiquement le format (7, 8 ou 9 colonnes) et parse en
+    conséquence. Elle ignore les lignes de détail (4 ou 2 colonnes).
     """
     # Extraction via </tbody> pour éviter les <table> imbriqués
     # dans les tooltips (colonne pluie)
@@ -108,41 +158,33 @@ def parse_observations(html_text: str) -> dict | None:
         _LOGGER.error("Aucune ligne trouvée dans le tableau")
         return None
 
-    # Chercher la 1re ligne avec 9 colonnes (format complet)
+    # Chercher la 1re ligne de données complète parmi les formats connus
+    # (9, 8 ou 7 colonnes). Les lignes à 2 ou 4 colonnes sont des
+    # détails pluie supplémentaires.
     tds = None
+    num_cols = 0
     for row in rows:
         cells = re.findall(r"<(t[dh])[^>]*>(.*?)</\1>", row, re.DOTALL)
-        if len(cells) == 9:
+        nc = len(cells)
+        if nc in (9, 8, 7):
             tds = cells
+            num_cols = nc
             break
 
     if not tds:
-        _LOGGER.warning("Aucune ligne de données complète (9 colonnes) trouvée")
+        _LOGGER.warning(
+            "Aucune ligne de données complète trouvée "
+            "(formats 7/8/9 colonnes attendus)"
+        )
         return None
 
     obs: dict = {}
 
     # Heure locale (colonne 0 - <th>)
-    m = re.search(r">(\d{1,2}h\d{2})</span>", tds[0][1])
-    if m:
-        obs["heure_locale"] = m.group(1)
-    m = re.search(r"(\d{2})h(\d{2})\s*UTC", tds[0][1])
-    if m:
-        obs["heure_utc"] = f"{m.group(1)}:{m.group(2)}"
-    m = re.search(r"(\d{2})/(\d{2})/(\d{4})", tds[0][1])
-    if m:
-        obs["date"] = f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+    _parse_time(tds[0][1], obs)
 
-    # Colonnes de données (nouveau format responsive 9 colonnes)
-    #  0: heure (th) | 1: temp | 2: icône | 3: pluie 1h | 4: vent
-    #  5: humidité   | 6: bio   | 7: rosée | 8: pression
-    obs["temperature"] = _extract_number(tds[1][1])
-    obs["pluie_1h"] = _extract_number(tds[3][1])
-    _parse_wind(tds[4][1], obs)
-    obs["humidite"] = _extract_number(tds[5][1])
-    obs["bio_meteo"] = _extract_number(tds[6][1])
-    obs["point_rosee"] = _extract_number(tds[7][1])
-    _parse_pressure(tds[8][1], obs)
+    # Données selon le format détecté
+    _parse_data_row(tds, obs, num_cols)
 
     # Nom station
     m = re.search(r"<h1[^>]*>(.*?)</h1>", html_text, re.DOTALL)

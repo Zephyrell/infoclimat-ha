@@ -4,3 +4,4 @@ __pycache__/
 test_scraper.py
 *.swp
 *.swo
+.claude/
