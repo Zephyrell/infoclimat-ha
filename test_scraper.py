@@ -105,77 +105,115 @@ def _parse_climato(html_text: str, obs: dict):
         obs["dju_froid"] = int(m.group(1))
 
 
-def _parse_data_row(tds: list, obs: dict, num_cols: int):
-    """Parse les colonnes selon le format détecté (9, 8 ou 7 colonnes)."""
-    if num_cols == 9:
-        # 0: heure | 1: temp | 2: icône | 3: pluie | 4: vent
-        # 5: hum   | 6: bio   | 7: rosée | 8: pression
-        obs["temperature"] = extract_number(tds[1][1])
-        obs["pluie_1h"] = extract_number(tds[3][1])
-        _parse_wind(tds[4][1], obs)
-        obs["humidite"] = extract_number(tds[5][1])
-        obs["bio_meteo"] = extract_number(tds[6][1])
-        obs["point_rosee"] = extract_number(tds[7][1])
-        _parse_pressure(tds[8][1], obs)
-    elif num_cols == 8:
-        # 0: heure | 1: temp | 2: pluie | 3: vent
-        # 4: hum   | 5: bio   | 6: rosée | 7: pression
-        obs["temperature"] = extract_number(tds[1][1])
-        obs["pluie_1h"] = extract_number(tds[2][1])
-        _parse_wind(tds[3][1], obs)
-        obs["humidite"] = extract_number(tds[4][1])
-        obs["bio_meteo"] = extract_number(tds[5][1])
-        obs["point_rosee"] = extract_number(tds[6][1])
-        _parse_pressure(tds[7][1], obs)
-    elif num_cols == 7:
-        # 0: heure | 1: temp | 2: vent | 3: hum
-        # 4: bio   | 5: rosée | 6: pression
-        obs["temperature"] = extract_number(tds[1][1])
-        _parse_wind(tds[2][1], obs)
-        obs["humidite"] = extract_number(tds[3][1])
-        obs["bio_meteo"] = extract_number(tds[4][1])
-        obs["point_rosee"] = extract_number(tds[5][1])
-        _parse_pressure(tds[6][1], obs)
+def _build_column_map(thead_html: str) -> dict[str, int] | None:
+    """Analyse les en-têtes et retourne un mapping nom→index de colonne."""
+    headers = re.findall(r'<th[^>]*>(.*?)</th>', thead_html, re.DOTALL)
+    col_map: dict[str, int] = {}
+
+    for idx, html in enumerate(headers):
+        txt = strip_tags(html)
+
+        if 'ressentie' in txt.lower() or 'bio' in txt.lower():
+            col_map['bio_meteo'] = idx
+        elif 'tempé' in txt.lower() or 'température' in txt.lower():
+            col_map['temperature'] = idx
+        elif txt.strip() == 'Pluie':
+            col_map['pluie_1h'] = idx
+        elif txt.strip() == 'Vent':
+            col_map['vent'] = idx
+        elif txt.strip() == 'Humidité':
+            col_map['humidite'] = idx
+        elif 'rosée' in txt.lower() or 'pt.' in txt.lower():
+            col_map['point_rosee'] = idx
+        elif txt.strip() == 'Pression':
+            col_map['pression'] = idx
+
+    if 'temperature' not in col_map:
+        print("ERREUR: colonne Température non trouvée")
+        return None
+
+    print(f"Mapping colonnes: {col_map}")
+    return col_map
+
+
+def _parse_data_row_by_map(tds: list, col_map: dict[str, int], obs: dict):
+    """Parse une ligne via le mapping colonne→index."""
+    # Température
+    idx = col_map.get('temperature')
+    if idx is not None:
+        obs['temperature'] = extract_number(tds[idx][1])
+
+    # Pluie 1h (optionnelle)
+    idx = col_map.get('pluie_1h')
+    if idx is not None:
+        obs['pluie_1h'] = extract_number(tds[idx][1])
+
+    # Vent
+    idx = col_map.get('vent')
+    if idx is not None:
+        _parse_wind(tds[idx][1], obs)
+
+    # Humidité
+    idx = col_map.get('humidite')
+    if idx is not None:
+        obs['humidite'] = extract_number(tds[idx][1])
+
+    # Bio-météo
+    idx = col_map.get('bio_meteo')
+    if idx is not None:
+        obs['bio_meteo'] = extract_number(tds[idx][1])
+
+    # Point de rosée
+    idx = col_map.get('point_rosee')
+    if idx is not None:
+        obs['point_rosee'] = extract_number(tds[idx][1])
+
+    # Pression
+    idx = col_map.get('pression')
+    if idx is not None:
+        _parse_pressure(tds[idx][1], obs)
 
 
 def parse_observations(html_text: str) -> dict | None:
-    """Parse la table HTML #resptable-releves et retourne la dernière observation.
+    """Parse la table HTML #resptable-releves en identifiant les colonnes
+    par leur en-tête (thead) plutôt que par leur position.
 
-    S'adapte automatiquement aux formats 7, 8 ou 9 colonnes.
+    Immunisé contre les changements d'ordre/d'index.
     """
-    # 1. Extraire le tbody (via </tbody> pour éviter les <table> imbriqués)
+    # 1. Extraire le tableau complet (thead + tbody) pour éviter les <table> imbriqués
     m = re.search(
         r'<table[^>]*id="resptable-releves"[^>]*>'
-        r'.*?<thead>.*?</thead>'
+        r'.*?<thead>(.*?)</thead>'
         r'.*?<tbody>(.*?)</tbody>',
         html_text, re.DOTALL,
     )
     if not m:
-        print("ERREUR: table #resptable-releves/tbody non trouvée")
+        print("ERREUR: table #resptable-releves non trouvée")
         return None
-    tbody = m.group(1)
 
-    # 2. Trouver toutes les lignes <tr>
+    # 2. Construire le mapping colonne→index depuis les en-têtes
+    col_map = _build_column_map(m.group(1))
+    if not col_map:
+        return None
+
+    tbody = m.group(2)
+
+    # 3. Trouver toutes les lignes <tr>
     trs = re.findall(r'<tr[^>]*>(.*?)</tr>', tbody, re.DOTALL)
     if not trs:
         print("ERREUR: aucune ligne dans le tableau")
         return None
 
-    # 3. Chercher la 1re ligne de données complète parmi les formats connus
-    #    (9, 8 ou 7 colonnes). Les lignes à 2 ou 4 colonnes sont des
-    #    détails pluie supplémentaires.
+    # 4. Chercher la 1re ligne de données complète (≥ 7 colonnes)
     tds = None
-    num_cols = 0
     for tr in trs:
         cells = re.findall(r'<(t[dh])[^>]*>(.*?)</\1>', tr, re.DOTALL)
-        nc = len(cells)
-        if nc in (9, 8, 7):
+        if len(cells) >= 7:
             tds = cells
-            num_cols = nc
             break
 
     if not tds:
-        print("ATTENTION: aucune ligne de données complète (7/8/9 cols)")
+        print("ATTENTION: aucune ligne de données complète trouvée")
         return None
 
     obs = {}
@@ -183,23 +221,23 @@ def parse_observations(html_text: str) -> dict | None:
     # --- Heure locale ---
     time_span = re.search(r'>(\d{1,2}h\d{2})</span>', tds[0][1])
     if time_span:
-        obs["heure_locale"] = time_span.group(1)
+        obs['heure_locale'] = time_span.group(1)
     utc_match = re.search(r'(\d{2})h(\d{2})\s*UTC', tds[0][1])
     if utc_match:
-        obs["heure_utc"] = f"{utc_match.group(1)}:{utc_match.group(2)}"
+        obs['heure_utc'] = f"{utc_match.group(1)}:{utc_match.group(2)}"
     date_match = re.search(r'(\d{2})/(\d{2})/(\d{4})', tds[0][1])
     if date_match:
-        obs["date"] = f"{date_match.group(3)}-{date_match.group(2)}-{date_match.group(1)}"
+        obs['date'] = f"{date_match.group(3)}-{date_match.group(2)}-{date_match.group(1)}"
 
-    # Données selon le format détecté
-    _parse_data_row(tds, obs, num_cols)
+    # Données via le mapping colonne→index
+    _parse_data_row_by_map(tds, col_map, obs)
 
     # --- Informations station ---
     h1 = re.search(r'<h1[^>]*>(.*?)</h1>', html_text, re.DOTALL)
     if h1:
-        obs["station"] = strip_tags(h1.group(1))
+        obs['station'] = strip_tags(h1.group(1))
 
-    obs["station_id"] = "000FU"
+    obs['station_id'] = '000FU'
 
     # --- Climatologie du jour ---
     _parse_climato(html_text, obs)

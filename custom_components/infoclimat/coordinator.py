@@ -81,43 +81,89 @@ def _parse_climato(text: str, obs: dict):
         obs["dju_froid"] = int(m.group(1))
 
 
-def _parse_data_row(tds: list, obs: dict, num_cols: int):
-    """Parse les colonnes de données selon le format détecté.
+def _build_column_map(headers_html: str) -> dict[str, int] | None:
+    """Analyse la ligne d'en-tête et retourne un mapping nom→index.
 
-    Formats historiques rencontrés sur Infoclimat :
-    - 9 colonnes : heure, temp, icône_temps, pluie, vent, hum, bio, rosée, pression
-    - 8 colonnes : heure, temp, pluie, vent, hum, bio, rosée, pression
-    - 7 colonnes : heure, temp, vent, hum, bio, rosée, pression (pluie absente)
+    Reconnaît les colonnes par leur contenu textuel (strip_tags) afin
+    d'être insensible à l'ordre et à la présence/absence de colonnes.
+    Retourne None si les colonnes obligatoires (température) sont absentes.
     """
-    if num_cols == 9:
-        # 0: heure | 1: temp | 2: icône | 3: pluie | 4: vent
-        # 5: hum   | 6: bio   | 7: rosée | 8: pression
-        obs["temperature"] = _extract_number(tds[1][1])
-        obs["pluie_1h"] = _extract_number(tds[3][1])
-        _parse_wind(tds[4][1], obs)
-        obs["humidite"] = _extract_number(tds[5][1])
-        obs["bio_meteo"] = _extract_number(tds[6][1])
-        obs["point_rosee"] = _extract_number(tds[7][1])
-        _parse_pressure(tds[8][1], obs)
-    elif num_cols == 8:
-        # 0: heure | 1: temp | 2: pluie | 3: vent
-        # 4: hum   | 5: bio   | 6: rosée | 7: pression
-        obs["temperature"] = _extract_number(tds[1][1])
-        obs["pluie_1h"] = _extract_number(tds[2][1])
-        _parse_wind(tds[3][1], obs)
-        obs["humidite"] = _extract_number(tds[4][1])
-        obs["bio_meteo"] = _extract_number(tds[5][1])
-        obs["point_rosee"] = _extract_number(tds[6][1])
-        _parse_pressure(tds[7][1], obs)
-    elif num_cols == 7:
-        # 0: heure | 1: temp | 2: vent
-        # 3: hum   | 4: bio   | 5: rosée | 6: pression
-        obs["temperature"] = _extract_number(tds[1][1])
-        _parse_wind(tds[2][1], obs)
-        obs["humidite"] = _extract_number(tds[3][1])
-        obs["bio_meteo"] = _extract_number(tds[4][1])
-        obs["point_rosee"] = _extract_number(tds[5][1])
-        _parse_pressure(tds[6][1], obs)
+    headers = re.findall(r"<th[^>]*>(.*?)</th>", headers_html, re.DOTALL)
+    col_map: dict[str, int] = {}
+
+    for idx, html in enumerate(headers):
+        txt = _strip_tags(html)
+
+        if "ressentie" in txt.lower() or "bio" in txt.lower():
+            col_map["bio_meteo"] = idx
+        elif "tempé" in txt.lower() or "température" in txt.lower():
+            col_map["temperature"] = idx
+        elif txt.strip() == "Pluie":
+            col_map["pluie_1h"] = idx
+        elif txt.strip() == "Vent":
+            col_map["vent"] = idx
+        elif txt.strip() == "Humidité":
+            col_map["humidite"] = idx
+        elif "rosée" in txt.lower() or "pt." in txt.lower():
+            col_map["point_rosee"] = idx
+        elif "ressentie" in txt.lower() or "bio" in txt.lower():
+            col_map["bio_meteo"] = idx
+        elif txt.strip() == "Pression":
+            col_map["pression"] = idx
+
+    # Colonne obligatoire : température
+    if "temperature" not in col_map:
+        _LOGGER.error("Colonne 'Température' non trouvée dans les en-têtes")
+        return None
+
+    _LOGGER.debug("Colonnes détectées: %s", col_map)
+    return col_map
+
+
+def _parse_data_row_by_map(tds: list, col_map: dict[str, int], obs: dict):
+    """Parse une ligne de données en utilisant le mapping colonne→index.
+
+    N'extrait que les colonnes présentes dans col_map. Si une colonne
+    est absente (pas dans col_map), le champ correspondant est ignoré
+    (valeur None dans obs).
+    """
+    def _get(idx):
+        return tds[idx][1] if idx < len(tds) else None
+
+    # Température
+    idx = col_map.get("temperature")
+    if idx is not None:
+        obs["temperature"] = _extract_number(tds[idx][1])
+
+    # Pluie 1h (colonne optionnelle)
+    idx = col_map.get("pluie_1h")
+    if idx is not None:
+        obs["pluie_1h"] = _extract_number(tds[idx][1])
+
+    # Vent
+    idx = col_map.get("vent")
+    if idx is not None:
+        _parse_wind(tds[idx][1], obs)
+
+    # Humidité
+    idx = col_map.get("humidite")
+    if idx is not None:
+        obs["humidite"] = _extract_number(tds[idx][1])
+
+    # Bio-météo
+    idx = col_map.get("bio_meteo")
+    if idx is not None:
+        obs["bio_meteo"] = _extract_number(tds[idx][1])
+
+    # Point de rosée
+    idx = col_map.get("point_rosee")
+    if idx is not None:
+        obs["point_rosee"] = _extract_number(tds[idx][1])
+
+    # Pression
+    idx = col_map.get("pression")
+    if idx is not None:
+        _parse_pressure(tds[idx][1], obs)
 
 
 def _parse_time(td_html: str, obs: dict):
@@ -136,55 +182,53 @@ def _parse_time(td_html: str, obs: dict):
 def parse_observations(html_text: str) -> dict | None:
     """Parse la page Infoclimat et retourne les observations les plus récentes.
 
-    Le tableau responsive change régulièrement de format. Cette fonction
-    détecte automatiquement le format (7, 8 ou 9 colonnes) et parse en
-    conséquence. Elle ignore les lignes de détail (4 ou 2 colonnes).
+    Identifie les colonnes par leur en-tête (thead) plutôt que par leur
+    position, ce qui rend le parsing immunisé contre les changements
+    d'ordre ou d'index des colonnes.
     """
-    # Extraction via </tbody> pour éviter les <table> imbriqués
-    # dans les tooltips (colonne pluie)
+    # Extraction du tableau complet (thead + tbody)
     table = re.search(
         r"<table[^>]*id=\"resptable-releves\"[^>]*>"
-        r".*?<thead>.*?</thead>"
+        r".*?<thead>(.*?)</thead>"
         r".*?<tbody>(.*?)</tbody>",
         html_text,
         re.DOTALL,
     )
     if not table:
-        _LOGGER.error("Table #resptable-releves/tbody non trouvée dans la page")
+        _LOGGER.error("Table #resptable-releves non trouvée dans la page")
         return None
 
-    rows = re.findall(r"<tr[^>]*>(.*?)</tr>", table.group(1), re.DOTALL)
+    # Construire le mapping colonne→index depuis les en-têtes
+    col_map = _build_column_map(table.group(1))
+    if not col_map:
+        _LOGGER.error("Impossible de détecter les colonnes du tableau")
+        return None
+
+    rows = re.findall(r"<tr[^>]*>(.*?)</tr>", table.group(2), re.DOTALL)
     if not rows:
-        _LOGGER.error("Aucune ligne trouvée dans le tableau")
+        _LOGGER.error("Aucune ligne trouvée dans le tbody")
         return None
 
-    # Chercher la 1re ligne de données complète parmi les formats connus
-    # (9, 8 ou 7 colonnes). Les lignes à 2 ou 4 colonnes sont des
-    # détails pluie supplémentaires.
+    # Chercher la 1re ligne de données complète (≥ 7 colonnes).
+    # Les lignes à 2 ou 4 colonnes sont des infos pluie supplémentaires.
     tds = None
-    num_cols = 0
     for row in rows:
         cells = re.findall(r"<(t[dh])[^>]*>(.*?)</\1>", row, re.DOTALL)
-        nc = len(cells)
-        if nc in (9, 8, 7):
+        if len(cells) >= 7:
             tds = cells
-            num_cols = nc
             break
 
     if not tds:
-        _LOGGER.warning(
-            "Aucune ligne de données complète trouvée "
-            "(formats 7/8/9 colonnes attendus)"
-        )
+        _LOGGER.warning("Aucune ligne de données complète trouvée")
         return None
 
     obs: dict = {}
 
-    # Heure locale (colonne 0 - <th>)
+    # Heure locale (1re cellule, <th>)
     _parse_time(tds[0][1], obs)
 
-    # Données selon le format détecté
-    _parse_data_row(tds, obs, num_cols)
+    # Données via le mapping colonne→index
+    _parse_data_row_by_map(tds, col_map, obs)
 
     # Nom station
     m = re.search(r"<h1[^>]*>(.*?)</h1>", html_text, re.DOTALL)
