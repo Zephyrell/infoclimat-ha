@@ -3,15 +3,27 @@
     "step": {
       "user": {
         "title": "Infoclimat Station",
-        "description": "Configure the Infoclimat weather station to monitor.",
+        "description": "Enter the 5-character StatIC identifier of the station to monitor (for example `000FU`). You may also paste the address of its Infoclimat page.",
         "data": {
           "station_id": "Station ID",
           "scan_interval": "Update interval (minutes)"
+        },
+        "data_description": {
+          "station_id": "Visible in the station URL on infoclimat.fr: …/temps-reel/station-name/000FU.html",
+          "scan_interval": "Between 5 and 60 minutes. Infoclimat publishes a reading every 10 minutes."
         }
       }
     },
     "error": {
-      "unknown": "Unexpected error"
+      "cannot_connect": "Unable to reach infoclimat.fr. Check your network connection.",
+      "cannot_parse": "The station page could not be parsed. The website may have changed its structure.",
+      "invalid_station_id": "Invalid identifier: 5 letters or digits expected (for example 000FU).",
+      "station_without_data": "This station publishes no real-time data. Check its identifier.",
+      "unknown": "Unexpected error",
+      "rate_limited": "Infoclimat blocked the automated requests (anti-robot page) and did not return the station. Wait a few minutes and try again, or increase the update interval."
+    },
+    "abort": {
+      "already_configured": "This station is already configured."
     }
   }
 }

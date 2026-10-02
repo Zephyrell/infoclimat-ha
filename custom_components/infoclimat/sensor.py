@@ -11,19 +11,31 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import (
-    CoordinatorEntity,
-    DataUpdateCoordinator,
-)
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, SENSOR_TYPES
+from .coordinator import InfoclimatCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+#: Capteurs dont l'état est un texte : pas de statistiques à en tirer.
+_TEXT_SENSORS = frozenset({"pression_tendance"})
+
+#: Métadonnées recopiées sur chaque capteur : de quoi juger la fraîcheur et
+#: l'origine de la mesure sans ouvrir le journal.
+_METADATA_KEYS = (
+    "station",
+    "station_id",
+    "station_status",
+    "station_last_report",
+    "obs_time_utc",
+    "age_releve_minutes",
+    "station_url",
+)
 
 
 async def async_setup_entry(
@@ -32,7 +44,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Infoclimat sensors from a config entry."""
-    coordinator: DataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: InfoclimatCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     sensors = []
     for sensor_key, sensor_config in SENSOR_TYPES.items():
@@ -48,7 +60,7 @@ class InfoclimatSensor(CoordinatorEntity, SensorEntity):
 
     def __init__(
         self,
-        coordinator: DataUpdateCoordinator,
+        coordinator: InfoclimatCoordinator,
         entry: ConfigEntry,
         sensor_key: str,
         sensor_config: dict,
@@ -58,7 +70,10 @@ class InfoclimatSensor(CoordinatorEntity, SensorEntity):
         self._sensor_key = sensor_key
         self._sensor_config = sensor_config
 
-        station_id = entry.data.get("station_id", "000FU")
+        station_id = coordinator.station_id
+        # Le premier rafraîchissement a déjà eu lieu : le nom de la station
+        # est connu, on peut l'utiliser comme nom d'appareil.
+        station_name = (coordinator.data or {}).get("station") or station_id
 
         self._attr_unique_id = f"{DOMAIN}_{station_id}_{sensor_key}"
         self._attr_entity_registry_enabled_default = sensor_config["enabled"]
@@ -67,13 +82,10 @@ class InfoclimatSensor(CoordinatorEntity, SensorEntity):
         self._attr_device_info = DeviceInfo(
             entry_type=DeviceEntryType.SERVICE,
             identifiers={(DOMAIN, station_id)},
-            name=f"Station Infoclimat {station_id}",
+            name=station_name,
             manufacturer="Infoclimat",
             model="StatIC",
-            configuration_url=(
-                "https://www.infoclimat.fr/observations-meteo/temps-reel"
-                f"/{station_id}.html"
-            ),
+            configuration_url=coordinator.station_url,
         )
 
     @property
@@ -100,6 +112,8 @@ class InfoclimatSensor(CoordinatorEntity, SensorEntity):
     @property
     def state_class(self) -> SensorStateClass | None:
         """State class."""
+        if self._sensor_key in _TEXT_SENSORS:
+            return None
         return SensorStateClass.MEASUREMENT
 
     @property
@@ -111,15 +125,31 @@ class InfoclimatSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        """Attributs additionnels."""
-        if self._sensor_key != "temperature" or self.coordinator.data is None:
+        """Attributs additionnels.
+
+        L'horodatage du relevé et son âge sont exposés partout : un scraper
+        peut servir une mesure figée sans que l'état change, et une
+        automatisation doit pouvoir s'en rendre compte.
+        """
+        data = self.coordinator.data
+        if data is None:
             return None
-        attrs = {}
-        for key in ("temp_max_jour", "temp_min_jour"):
-            if key in self.coordinator.data:
-                attrs[key] = self.coordinator.data[key]
-        # Add station metadata
-        for key in ("station", "station_id", "date", "heure_locale", "heure_utc"):
-            if key in self.coordinator.data:
-                attrs[key] = self.coordinator.data[key]
-        return attrs if attrs else None
+
+        attrs: dict[str, Any] = {}
+        for key in _METADATA_KEYS:
+            if key in data:
+                attrs[key] = data[key]
+
+        # Extrêmes du jour, regroupés sur le capteur de température
+        if self._sensor_key == "temperature":
+            for key in (
+                "temp_max_jour",
+                "temp_min_jour",
+                "date",
+                "heure_locale",
+                "heure_utc",
+            ):
+                if key in data:
+                    attrs[key] = data[key]
+
+        return attrs or None

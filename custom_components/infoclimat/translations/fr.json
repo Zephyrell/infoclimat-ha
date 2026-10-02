@@ -3,15 +3,27 @@
     "step": {
       "user": {
         "title": "Station Infoclimat",
-        "description": "Configurez la station météo Infoclimat à interroger.",
+        "description": "Indiquez l'identifiant StatIC de la station à suivre (5 caractères, par exemple `000FU`). Vous pouvez aussi coller l'adresse de sa page Infoclimat.",
         "data": {
           "station_id": "Identifiant de la station",
           "scan_interval": "Intervalle de mise à jour (minutes)"
+        },
+        "data_description": {
+          "station_id": "Visible dans l'URL de la station sur infoclimat.fr : …/temps-reel/nom-de-la-station/000FU.html",
+          "scan_interval": "Entre 5 et 60 minutes. Infoclimat publie un relevé toutes les 10 minutes."
         }
       }
     },
     "error": {
-      "unknown": "Erreur inattendue"
+      "cannot_connect": "Impossible de joindre infoclimat.fr. Vérifiez votre connexion réseau.",
+      "cannot_parse": "La page de la station n'a pas pu être analysée. Le site a peut-être changé de structure.",
+      "invalid_station_id": "Identifiant invalide : attendu 5 lettres ou chiffres (par exemple 000FU).",
+      "station_without_data": "Cette station ne publie aucune donnée temps réel. Vérifiez son identifiant.",
+      "unknown": "Erreur inattendue",
+      "rate_limited": "Infoclimat a bloqué les requêtes automatiques (page anti-robot) et n'a pas renvoyé la station. Patientez quelques minutes puis réessayez, ou augmentez l'intervalle de mise à jour."
+    },
+    "abort": {
+      "already_configured": "Cette station est déjà configurée."
     }
   }
 }

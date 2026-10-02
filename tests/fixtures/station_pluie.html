@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="fr">
+<head><title>Station pluvieuse (fixture)</title></head>
+<body>
+
+<!-- ── Popups : ne doivent jamais polluer le parsing ────────────────── -->
+<div id="modal-canicule" class="modal modal-fixed-footer">
+  <div class="modal-content">
+    <h4>Cap sur 2026</h4>
+    <p>Il est tombé 99.9 mm et la température a atteint 48.7 °C.</p>
+    <table><tr><td>01/01/1999</td><td>48.7</td></tr></table>
+  </div>
+  <div class="modal-footer"><a class="modal-close btn-flat">Fermer</a></div>
+</div>
+<div id="modal-don-helloasso" class="modal">
+  <div class="modal-content">Chargement...<a class="modal-close">Ne pas soutenir</a></div>
+</div>
+
+<h1>Saint-Paul-Trois-Châteaux</h1>
+
+<div class="resptable-container">
+  <!-- Copie technique pour l'en-tête figé : à ignorer -->
+  <table id="duplicate-resptable" class="resptable" style="display:none">
+    <thead><tr><th>Heure</th><th>Tempé</th><th>Pluie</th><th>Vent</th><th>Humidité</th><th>Bio</th><th>Rosée</th><th>Pression</th></tr></thead>
+    <tbody><tr><td>00h00</td><td>-99</td><td>-99</td><td>-99</td><td>-99</td><td>-99</td><td>-99</td><td>-99</td></tr></tbody>
+  </table>
+
+  <table id="resptable-releves" class="resptable">
+    <thead>
+      <tr>
+        <th style="padding-left:35px">
+          Heure locale
+          <a href="?dixminutes" class="white-text tipsy-trigger" title="Cliquez ici pour activer les relevés toutes les 10 minutes.">
+            <div style="position:absolute"><i class="material-icons">access_time</i>10mn</div>
+          </a>
+        </th>
+        <th><a href="javascript:void(0)" class="tipsy-trigger white-text" title="Température sous abri normalisé,<br />relevée entre 1m50 et 2m du sol">Tempé<span class="hide-on-small-only">rature</span></a></th>
+        <th><a href="javascript:void(0)" class="tipsy-trigger white-text" title="Précipitations tombées en 1h">Pluie</a></th>
+        <th><a href="javascript:void(0)" class="tipsy-trigger white-text" title="Vent moyen et en rafales, observé à 10m">Vent</a></th>
+        <th><a href="javascript:void(0)" class="tipsy-trigger white-text" title="Humidité relative">Humidité</a></th>
+        <th><a href="javascript:void(0)" class="tipsy-trigger white-text" title="<b>Température ressentie</b><br />Elle correspond au windchill lorsque la température est inférieure à 10°C. <b>Ces données n'ont pas d'unité.</b>">Bio-météo</a></th>
+        <th><a href="javascript:void(0)" class="tipsy-trigger white-text" title="Point de rosée observé à 2m">Pt.&nbsp;de rosée</a></th>
+        <th><a href="javascript:void(0)" class="tipsy-trigger white-text" title="Pression atmosphérique ramenée au niveau de la mer">Pression</a></th>
+      </tr>
+    </thead>
+    <tbody>
+      <!-- Relevé le plus récent : il pleut, la cellule Pluie contient une
+           table HTML imbriquée DANS SON ATTRIBUT title. -->
+      <tr>
+        <th style="font-size:1.25em">
+          <span class="tipsy-trigger" title="Heure r&eacute;elle d'&eacute;mission :<br />02/10/2026<br /><b>09h30 UTC</b>">11h30</span>
+        </th>
+        <td><span style="font-weight:bold;display:inline-block;font-size:16px">12.4</span> <span class="tab-units-v">&deg;C</span><span class="color-heatmap"></span></td>
+        <td>2.4 <span class="tab-units-v">mm/1h</span><br /><a href="javascript:void(0)" title="<table class='minitable-details' style='table-layout:fixed'><tr><td><b>Pluie/3h :</b></td><td>3.6mm</td></tr><tr><td><b>Pluie/24h :</b></td><td>12.4mm</td></tr></table>" class="tipsy-trigger button-rr-pluvio"><span></span></a></td>
+        <td style="padding-left:20px; white-space: nowrap;"><span style="font-weight:bold">23</span> <span class="tab-units-v">km/h</span><br /><span class="tab-units-v">raf.</span><span style="font-weight:bold">47.5</span><div style="position:absolute" title="Vent de direction 245&deg;" class="tipsy-trigger"></div></td>
+        <td><span style="font-weight:bold;display:inline-block">94</span><span class="tab-units-v">%</span></td>
+        <td><span style="display:inline-block">11.2</span></td>
+        <td><span style="font-weight:bold;display:inline-block">11.5</span> <span class="tab-units-v">&deg;C</span></td>
+        <td>997.3<span class="tab-units-v">hPa</span><br /><img title="-1.4 hPa/3h" class="tipsy-trigger" src="//static.infoclimat.net/images/v5.2/down.png" alt="baisse" /></td>
+      </tr>
+      <!-- Relevé intermédiaire : pas de mesure pluviométrique sur cette ligne -->
+      <tr>
+        <th style="font-size:1.25em">
+          <span class="tipsy-trigger" title="Heure r&eacute;elle d'&eacute;mission :<br />02/10/2026<br /><b>09h20 UTC</b>">11h20</span>
+        </th>
+        <td><span style="font-weight:bold;display:inline-block;font-size:16px">12.6</span> <span class="tab-units-v">&deg;C</span></td>
+        <td></td>
+        <td style="padding-left:20px; white-space: nowrap;"><span style="font-weight:bold">21</span> <span class="tab-units-v">km/h</span><br /><span class="tab-units-v">raf.</span><span style="font-weight:bold">40.2</span><div style="position:absolute" title="Vent de direction 250&deg;" class="tipsy-trigger"></div></td>
+        <td><span style="font-weight:bold;display:inline-block">93</span><span class="tab-units-v">%</span></td>
+        <td></td>
+        <td><span style="font-weight:bold;display:inline-block">11.5</span> <span class="tab-units-v">&deg;C</span></td>
+        <td>997.5<span class="tab-units-v">hPa</span><br />=</td>
+      </tr>
+      <!-- Relevé horaire : pluviométrie renseignée -->
+      <tr>
+        <th style="font-size:1.25em">
+          <span class="tipsy-trigger" title="Heure r&eacute;elle d'&eacute;mission :<br />02/10/2026<br /><b>09h00 UTC</b>">11h00</span>
+        </th>
+        <td><span style="font-weight:bold;display:inline-block;font-size:16px">12.2</span> <span class="tab-units-v">&deg;C</span></td>
+        <td>2.4 <span class="tab-units-v">mm/1h</span><br /><a href="javascript:void(0)" title="<table class='minitable-details' style='table-layout:fixed'><tr><td><b>Pluie/3h :</b></td><td>3.6mm</td></tr><tr><td><b>Pluie/6h :</b></td><td>5.2mm</td></tr><tr><td><b>Pluie/12h :</b></td><td>9.8mm</td></tr><tr><td><b>Pluie/24h :</b></td><td>12.4mm</td></tr></table>" class="tipsy-trigger button-rr-pluvio"><span></span></a></td>
+        <td style="padding-left:20px; white-space: nowrap;"><span style="font-weight:bold">25</span> <span class="tab-units-v">km/h</span><br /><span class="tab-units-v">raf.</span><span style="font-weight:bold">55.4</span><div style="position:absolute" title="Vent de direction 240&deg;" class="tipsy-trigger"></div></td>
+        <td><span style="font-weight:bold;display:inline-block">95</span><span class="tab-units-v">%</span></td>
+        <td></td>
+        <td><span style="font-weight:bold;display:inline-block">11.4</span> <span class="tab-units-v">&deg;C</span></td>
+        <td>998.7<span class="tab-units-v">hPa</span><br /><img title="-1.1 hPa/3h" class="tipsy-trigger" src="//static.infoclimat.net/images/v5.2/down.png" alt="baisse" /></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ── Climatologie du jour ─────────────────────────────────────────── -->
+<table class="recap-clim-resp">
+  <tr class="recap-clim-focus red lighten-4">
+    <td>
+      <img src="//static.infoclimat.net/images/tx.png">
+      Température maximale
+      <span class="recap-clim-comment">provisoire 6h (J) à 09h30 UTC</span>
+    </td>
+    <td colspan=2><div><b>13.9</b>°C<span class="recap-clim-date">à 08:40 UTC</span></div></td>
+  </tr>
+  <tr class="red lighten-5">
+    <td>&nbsp;</td>
+    <td class="recap-clim-head">record max.</td>
+    <td class="recap-clim-head">record min.</td>
+  </tr>
+  <tr class="red lighten-5">
+    <td class="recap-clim-light">
+      Précédent record en octobre
+      <a href="/climatologie/globale/mois-de-octobre/saint-paul-trois-chateaux/000FU.html"><i class="material-icons">add_circle</i> de records</a>
+    </td>
+    <td><span style="font-size:1.1em">31.4°C</span><br /><span class="recap-clim-date">9/10/2023</span></td>
+    <td><span style="font-size:1.1em">7.3°C</span><br /><span class="recap-clim-date">29/10/2018</span></td>
+  </tr>
+  <!--<tr class="red lighten-5"><td>Précédent record décadaire<br /><b>BATTU</b></td><td>00°C</td></tr>-->
+  <tr class="recap-clim-focus blue lighten-4">
+    <td>
+      <img src="//static.infoclimat.net/images/tn.png">
+      Température minimale
+      <span class="recap-clim-comment">provisoire 18h (J-1) à 09h30 UTC</span>
+    </td>
+    <td colspan=2><div><b>11.1</b>°C<span class="recap-clim-date">à 05:10 UTC</span></div></td>
+  </tr>
+  <tr>
+    <td>Rafale maximale<span class="recap-clim-comment">0h-0h UTC</span></td>
+    <td colspan=2><div><b>55.4</b>km/h</div></td>
+  </tr>
+  <tr>
+    <td>Cumul maxi en 1h<span class="recap-clim-comment">0h-0h UTC</span></td>
+    <td colspan=2><div><b>2.4</b>mm</div></td>
+  </tr>
+  <tr>
+    <td>Cumul du jour<span class="recap-clim-comment">6h à 6h(J+1)</span></td>
+    <td colspan=2><div><b>12.4</b>mm <span class="recap-clim-comment">partiel</span></div></td>
+  </tr>
+  <tr class="recap-clim-focus green lighten-4">
+    <td>
+      Degrés Jour Unifiés (DJU)
+      <span class="recap-clim-comment tipsy-trigger" title="Vous pouvez changer la base de calcul des DJU en bas de page.">
+        <a href="https://fr.wikipedia.org/wiki/Degr%C3%A9_jour_unifi%C3%A9">méthode "professionnels de l'énergie"</a>, base 18
+      </span>
+    </td>
+    <td colspan=2>
+      <div style="display:inline-block">
+        <b>5.4</b> chauffe<span class="hide-on-small-only"> (DJC)</span><br />
+        <b>0.0</b> froid<span class="hide-on-small-only"> (DJF)</span>
+      </div>
+    </td>
+  </tr>
+</table>
+
+<table class="tableau-metadonnees">
+  <tr>
+    <th>Altitude</th>
+    <td>107 mètres</td>
+  </tr>
+  <tr>
+    <th>Dernier report</th>
+    <td>
+      <div class="led-verte"></div>2 octobre  2026, 11h30
+    </td>
+  </tr>
+</table>
+
+</body>
+</html>

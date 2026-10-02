@@ -17,16 +17,17 @@ DEFAULT_SCAN_INTERVAL = 10  # minutes
 CONF_STATION_ID = "station_id"
 CONF_SCAN_INTERVAL = "scan_interval"
 
-# Base URL for scraping
+# Page publique d'une station. Le premier segment d'URL est un « slug »
+# lisible (« saint-paul-trois-chateaux ») ; Infoclimat redirige en 302 vers
+# le bon slug quel que soit celui qu'on demande, on peut donc y placer
+# l'identifiant de la station. Aucune table de correspondance à maintenir.
 URL_PATTERN = (
     "https://www.infoclimat.fr/observations-meteo/temps-reel"
-    "/{station_slug}/{station_id}.html"
+    "/{station_id}/{station_id}.html"
 )
 
-STATION_SLUGS = {
-    "000FU": "saint-paul-trois-chateaux",
-    # Future stations can be added here
-}
+#: Au-delà de ce délai sans nouveau relevé, la station est signalée en retard.
+STALE_AFTER_MINUTES = 90
 
 # Sensor definitions: (key, name, device_class, unit, icon, enabled_by_default)
 SENSOR_TYPES = {
@@ -140,6 +141,48 @@ SENSOR_TYPES = {
         "device_class": "precipitation",
         "unit": "mm",
         "icon": None,
+        "enabled": False,
+    },
+    "pluie_3h": {
+        "name": "Pluie cumul (3h)",
+        "device_class": "precipitation",
+        "unit": "mm",
+        "icon": None,
+        "enabled": False,
+    },
+    "pluie_6h": {
+        "name": "Pluie cumul (6h)",
+        "device_class": "precipitation",
+        "unit": "mm",
+        "icon": None,
+        "enabled": False,
+    },
+    "pluie_12h": {
+        "name": "Pluie cumul (12h)",
+        "device_class": "precipitation",
+        "unit": "mm",
+        "icon": None,
+        "enabled": False,
+    },
+    "pluie_24h": {
+        "name": "Pluie cumul (24h)",
+        "device_class": "precipitation",
+        "unit": "mm",
+        "icon": None,
+        "enabled": False,
+    },
+    "dju_chauffe": {
+        "name": "DJU chauffage",
+        "device_class": None,
+        "unit": None,
+        "icon": "mdi:radiator",
+        "enabled": False,
+    },
+    "dju_froid": {
+        "name": "DJU froid",
+        "device_class": None,
+        "unit": None,
+        "icon": "mdi:snowflake",
         "enabled": False,
     },
 }

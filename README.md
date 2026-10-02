@@ -9,6 +9,11 @@ Sans API, sans clé — l'intégration parse la page publique de la station
 pour en extraire les données. Idéal pour les stations locales non
 couvertes par la station synoptique Météo-France la plus proche.
 
+Le parsing est **piloté par les en-têtes du tableau**, jamais par des
+positions de colonnes : un changement d'ordre, l'apparition ou la
+disparition d'une colonne ne cassent rien. Voir
+[Architecture](#architecture).
+
 ## Capteurs
 
 | Capteur | Device Class | Unité | Activé par défaut |
@@ -29,17 +34,19 @@ couvertes par la station synoptique Météo-France la plus proche.
 | Rafale max du jour | — | km/h | 🔸 |
 | Pluie max/1h du jour | `precipitation` | mm/h | 🔸 |
 | Pluie cumul jour | `precipitation` | mm | 🔸 |
+| Pluie cumul (3h) | `precipitation` | mm | 🔸 |
+| Pluie cumul (6h) | `precipitation` | mm | 🔸 |
+| Pluie cumul (12h) | `precipitation` | mm | 🔸 |
+| Pluie cumul (24h) | `precipitation` | mm | 🔸 |
+| DJU chauffage | — | — | 🔸 |
+| DJU froid | — | — | 🔸 |
 
 🔸 = activable dans l'interface HA après installation
 
-## Stations disponibles
-
-| ID | Station | Département |
-|----|---------|-------------|
-| 000FU | Saint-Paul-Trois-Châteaux | Drôme (26) |
-
-> Pour ajouter une station : fais une PR en ajoutant son ID et son slug
-> dans le dictionnaire `STATION_SLUGS` du fichier `const.py`.
+Chaque capteur expose en attributs l'horodatage réel du relevé
+(`obs_time_utc`), son âge en minutes (`age_releve_minutes`), le nom de la
+station et l'URL de sa page. Le capteur de température porte en plus les
+extrêmes du jour.
 
 ## Installation
 
@@ -60,27 +67,129 @@ couvertes par la station synoptique Météo-France la plus proche.
 
 1. Va dans **Paramètres → Périphériques & Services → Ajouter une intégration**
 2. Cherche **Infoclimat Scraper**
-3. Sélectionne ta station dans la liste
+3. Saisis l'identifiant StatIC de la station (5 caractères, ex. `000FU`).
+   L'URL complète de sa page Infoclimat fonctionne aussi — colle-la telle
+   quelle, l'identifiant en sera extrait
 4. Définis l'intervalle de mise à jour (5 à 60 min, 10 par défaut)
 5. Les capteurs apparaissent automatiquement dans tes entités
+
+L'identifiant se lit dans l'adresse de la page de la station :
+`…/temps-reel/saint-paul-trois-chateaux/000FU.html` → `000FU`.
 
 ## Architecture
 
 ```
 custom_components/infoclimat/
-├── __init__.py        # Point d'entrée de l'intégration
-├── config_flow.py     # Écran de configuration dans l'UI HA
-├── const.py           # Constantes et définition des capteurs
-├── coordinator.py     # Polling HTTP + parsing HTML
-├── sensor.py          # Entités capteurs Home Assistant
-├── manifest.json      # Métadonnées
-└── translations/      # Traductions (fr, en)
+├── __init__.py          # Point d'entrée de l'intégration
+├── config_flow.py       # Écran de configuration dans l'UI HA
+├── const.py             # Constantes et définition des capteurs
+├── coordinator.py       # Polling HTTP — aucune règle de parsing
+├── sensor.py            # Entités capteurs Home Assistant
+├── manifest.json        # Métadonnées
+├── translations/        # Traductions (fr, en)
+└── parsing/             # Moteur de parsing, en couches
+    ├── dom.py           #   tokenizer HTML → arbre
+    ├── tables.py        #   où sont les tableaux (sélecteurs)
+    ├── columns.py       #   en-tête → rôle logique (alias)
+    ├── fields.py        #   cellule → capteurs (extracteurs)
+    ├── climatology.py   #   table « climatologie du jour »
+    ├── antibot.py       #   détection de la page anti-robot
+    ├── notices.py       #   popups et fenêtres d'information
+    └── report.py        #   traçabilité de chaque cycle
 ```
+
+Chaque couche est remplaçable indépendamment, et aucune ne connaît les
+autres en dehors de la suivante.
+
+- **`dom.py`** construit un arbre à partir du HTML avec le tokenizer de la
+  bibliothèque standard. C'est ce qui rend le reste possible : un
+  `title="<table>…</table>"` (voir [Dépannage](#dépannage)) n'est plus un
+  piège pour une expression régulière, c'est simplement un attribut.
+- **`tables.py`** localise le tableau des relevés par son `id`, puis par sa
+  classe, puis dans son conteneur — avec repli documenté à chaque étage.
+- **`columns.py`** associe chaque colonne à un **rôle** (`temperature`,
+  `pluie_1h`, `vent`…) en comparant les en-têtes à un registre d'alias
+  normalisés (accents et ponctuation ignorés). Une colonne inconnue est
+  signalée, jamais devinée.
+- **`fields.py`** contient un extracteur par rôle : une fonction pure qui
+  reçoit une cellule et rend un dictionnaire de mesures.
+- **`report.py`** produit un compte rendu à chaque cycle, journalisé par le
+  coordinateur en `INFO` (résumé) et `DEBUG` (détail).
+
+**Ajouter un capteur** = un extracteur dans `fields.py` + un alias dans
+`columns.py` + une entrée dans `SENSOR_TYPES`. Aucun index, aucun libellé
+de colonne n'est codé en dur ailleurs.
 
 ### Dépendances
 
 **Aucune.** Uniquement la bibliothèque standard Python et les modules
 embarqués dans Home Assistant (`aiohttp`, `voluptuous`).
+
+## Dépannage
+
+`test_scraper.py` interroge une station en direct et affiche le relevé
+**avec son rapport de parsing** :
+
+```bash
+python3 test_scraper.py                 # station par défaut
+python3 test_scraper.py 00001 00052     # plusieurs stations
+python3 test_scraper.py --html page.html
+```
+
+Les tests se lancent avec `python3 -m pytest tests/`. Ils tournent hors
+ligne, sur des pages figées dans `tests/fixtures/`, et couvrent une
+situation par fixture.
+
+### Pourquoi le parsing cassait quand il pleuvait
+
+Quand il a plu dans les dernières 24 h, Infoclimat ajoute une infobulle à la
+cellule « Pluie » — et le contenu de cette infobulle est **une table HTML**,
+logée dans l'attribut `title` :
+
+```html
+<td>2.4 mm/1h<br />
+  <a title="<table><tr><td><b>Pluie/24h :</b></td><td>12.4mm</td></tr></table>">
+```
+
+Un parseur à base d'expressions régulières découpe les lignes avec
+`<tr…>(.*?)</tr>` : il s'arrête au premier `</tr>` rencontré, y compris
+celui qui dort *à l'intérieur de l'attribut*. La ligne est tronquée en
+morceaux qui n'atteignent plus le nombre de colonnes attendu, et le relevé
+le plus récent est purement et simplement écarté. En vue horaire — où
+chaque ligne porte une mesure de pluie — **plus aucune ligne n'était
+exploitable et l'intégration tombait**. Le même mécanisme faisait fuir du
+texte d'infobulle dans les en-têtes, et un `(\d+) chauffe` lisait `1` dans
+`0.1 chauffe`.
+
+Le test `test_regression_l_ancien_parser_perdait_la_ligne_pluvieuse`
+conserve cet ancien découpage pour documenter le bug ; il échouerait si
+l'on revenait à cette approche.
+
+### Station muette
+
+Quand une station ne publie plus, le site l'indique lui-même dans sa fiche
+(« Dernier report : 5 mai 2026, 07h30 », voyant rouge). L'intégration lit
+cette fiche et la reprend dans le message d'erreur, dans `station_status` et
+`station_last_report` — de quoi distinguer une station fermée d'un
+identifiant mal saisi, sans ouvrir le navigateur.
+
+### Blocage anti-robot
+
+Interrogé trop souvent, Infoclimat renvoie **une page valide, au même
+titre, mais vide de tout relevé** — remplacée par un message et un
+reCAPTCHA :
+
+> Notre serveur a détecté que votre requête était potentiellement
+> automatisée. (…) nos moyens limités ne nous permettent pas d'autoriser ce
+> type d'utilisation.
+
+L'intégration identifie cette page (`AntiBotChallengeError`), l'annonce
+pour ce qu'elle est — et non comme une station hors service — puis espace
+ses requêtes à 30 minutes avant de revenir à la cadence configurée dès
+qu'un relevé passe. Si cela se reproduit souvent, augmentez l'intervalle.
+
+Les relevés StatIC sont publiés toutes les 10 minutes : interroger plus
+souvent n'apporte rien et vous expose au blocage.
 
 ## Licence
 
