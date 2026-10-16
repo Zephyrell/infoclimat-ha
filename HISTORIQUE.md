@@ -126,9 +126,13 @@ explicites pour l'utilisateur.
 
 ### Questions ouvertes
 
-- **Tags et releases.** Le dépôt n'a qu'un tag `1.0.0` alors que
-  `manifest.json` est en `1.3.0`. HACS peut proposer des versions fantômes.
-  Créer le tag à chaque changement visible.
+- **Tags et releases — résolu.** Le dépôt n'avait qu'un tag `1.0.0`,
+  pointant sur le code d'avant la refonte, et **aucune release GitHub**. HACS
+  peuple son sélecteur de version avec les releases : dans cet état, une
+  réinstallation pouvait remettre le parseur regex cassé en place, ce qui
+  ressemble trait pour trait à « l'intégration ne marche plus ». Corrigé par
+  la release `1.3.0` du 16 octobre 2026. À refaire à chaque changement
+  visible : tag **et** release sur `main`.
 - **Portée du blocage anti-robot.** Le blocage est apparu sur une URL alors
   qu'une autre répondait normalement dans la même minute — le déclenchement
   semble lié au volume de requêtes récentes plus qu'à un quota global. À
