@@ -165,6 +165,29 @@ Le test `test_regression_l_ancien_parser_perdait_la_ligne_pluvieuse`
 conserve cet ancien découpage pour documenter le bug ; il échouerait si
 l'on revenait à cette approche.
 
+### Toutes les entités indisponibles, et « Échec de la configuration »
+
+Infoclimat annonce `charset=utf-8` dans ses en-têtes HTTP **et publie du
+Latin-1 par endroits** — deux octets `0xe0` dans une phrase de prose de la page
+de `000FU`, et aucun `<meta charset>` pour se rattraper. En `1.3.0` et avant,
+l'intégration décodait la réponse en strict : l'exception qui en résultait
+n'était ni une erreur réseau ni une erreur de parsing, elle traversait donc les
+`except`, faisait échouer la configuration, et **toutes les entités restaient
+indisponibles en boucle**, avec pour seul indice :
+
+```
+Échec de la configuration, nouvel essai:
+'utf-8' codec can't decode byte 0xe0 in position 108369: invalid continuation byte
+```
+
+Corrigé en **1.3.1** par `parsing/encoding.py`, qui ne lève jamais : le jeu de
+caractères annoncé d'abord, puis `utf-8`, toujours en décodage tolérant. Les
+octets fautifs sont hors du tableau des relevés, les mesures sont numériques —
+le remplacement ne coûte rien.
+
+Si tu as ce message, mets à jour : c'est la seule cause connue qui mette
+l'intégration entièrement hors service.
+
 ### Station muette
 
 Quand une station ne publie plus, le site l'indique lui-même dans sa fiche

@@ -9,6 +9,91 @@ page réelle — le mentionner sinon.
 
 ---
 
+## 2026-10-16 — Toutes les entités indisponibles (v1.3.0 → v1.3.1)
+
+### Le symptôme
+
+Signalé par Zephyrell : **toutes les entités indisponibles**, avant comme après
+la mise à jour en `1.3.0`. Le message affiché par Home Assistant :
+
+```
+Échec de la configuration, nouvel essai:
+'utf-8' codec can't decode byte 0xe0 in position 108369: invalid continuation byte
+```
+
+### La cause
+
+**Le site annonce `charset=utf-8` et publie du Latin-1.** Vérifié sur la page
+réelle de `000FU` : l'en-tête dit `content-type: text/html; charset=utf-8`,
+il n'y a aucun `<meta charset>` pour se rattraper, et deux octets `0xe0`
+(« à ») traînent dans la phrase « une bruine faible et continue à la station ».
+`cp1252` et `iso-8859-1` décodent la page entière sans broncher.
+
+Or `aiohttp` fait confiance à l'en-tête : `response.text()` décode en
+**strict** et lève `UnicodeDecodeError`.
+
+Le bug tenait à cette exception, et à ce qu'elle n'est **ni** une
+`aiohttp.ClientError` **ni** une erreur de parsing. Les `except` de
+`_async_fetch` la laissaient donc passer. Elle remontait jusqu'à
+`async_config_entry_first_refresh()`, qui la transformait en échec de
+configuration : l'intégration n'était jamais configurée, aucune entité n'était
+créée, et Home Assistant se contentait de réessayer indéfiniment. D'où le
+tableau : **panne totale, permanente, sans indice sur la cause**, identique
+dans toutes les versions.
+
+### Pourquoi personne ne l'avait vu
+
+`test_scraper.py` décodait ainsi :
+
+```python
+return response.read().decode("utf-8", errors="replace")
+```
+
+`errors="replace"` — le diagnostic **réparait la page en silence** et
+l'intégration levait. Le même jour, le même site, la même page : l'un
+fonctionnait, l'autre non, et j'ai pendant des heures conclu de l'un que
+l'autre allait bien. C'est la vraie leçon de cette panne : **un outil de
+diagnostic qui ne décode pas comme le code testé ne diagnostique rien.**
+`test_scraper.py` utilise désormais `decode_page`, comme l'intégration.
+
+### Le correctif
+
+`parsing/encoding.py` — `decode_page(raw, charset)`, la seule frontière où des
+octets deviennent du texte, et elle ne lève jamais : jeu de caractères annoncé
+d'abord, puis `utf-8`, toujours en `errors="replace"`. Les deux octets fautifs
+sont hors du tableau des relevés (vérifié : 0 octet invalide dans le tableau),
+et les mesures sont numériques — le remplacement ne coûte rien.
+
+Le champ de configuration (`config_flow.py`) souffrait du même défaut, au même
+endroit : c'est lui qui bloquait l'ajout de la station.
+
+### Ce qui a été essayé avant, et qui était faux
+
+À consigner pour ne pas refaire le chemin :
+
+- **Le tag `1.0.0` et l'absence de release GitHub** → vrai problème, corrigé,
+  mais sans rapport avec cette panne : `parsing/` était bien présent sur le
+  serveur.
+- **Un faux `User-Agent` (Chrome) sur une pile TLS Python, filtré par
+  Cloudflare** (`188.114.96.2`) → testé depuis le serveur avec l'UA exact de
+  l'intégration : `HTTP 200`, page complète. Faux.
+- **Le réseau / DNS de la VM** → `curl` y répondait `200` avec 297 Ko.
+- **La lenteur du parseur** → 0,04 s mesuré sur les 297 Ko, très loin du délai
+  de 15 s.
+
+Le fil rouge de ces fausses pistes : tout était testé **depuis le Mac**, jamais
+depuis la VM, et avec un décodeur plus permissif que celui de l'intégration.
+
+### État vérifié
+
+- 45 tests (39 + 6). Les 6 nouveaux **échouent si l'on réintroduit le décodage
+  strict** — vérifié en le réintroduisant : 4 échecs avec `UnicodeDecodeError`.
+- Vrai coordinateur, octets bruts du serveur, deux stations : `000FU` → 17,4 °C ;
+  `00001` → 12,3 °C avec `pluie_1h`, `pluie_3h`, `pluie_6h`, `pluie_12h` et
+  `pluie_24h` tous lus (le cas de l'infobulle).
+
+---
+
 ## 2026-10-02 — Refonte du parsing (v1.2.0 → v1.3.0)
 
 ### Le symptôme

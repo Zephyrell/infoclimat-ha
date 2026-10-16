@@ -28,6 +28,7 @@ from .parsing import (
     AntiBotChallengeError,
     InfoclimatParseError,
     StationWithoutDataError,
+    decode_page,
     parse_station_page,
 )
 
@@ -74,7 +75,7 @@ async def validate_input(hass: HomeAssistant, station_id: str) -> str:
         response = await session.get(url, headers={"User-Agent": USER_AGENT})
         async with response:
             response.raise_for_status()
-            html = await response.text()
+            html = decode_page(await response.read(), response.charset)
 
     observation = await hass.async_add_executor_job(parse_station_page, html)
     data = observation.data

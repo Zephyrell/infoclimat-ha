@@ -16,7 +16,7 @@ import stubs
 
 stubs.install()
 
-from conftest import load_fixture  # noqa: E402
+from conftest import load_fixture, load_fixture_bytes  # noqa: E402
 from infoclimat import coordinator as coordinator_module  # noqa: E402
 from infoclimat.coordinator import InfoclimatCoordinator, _format_age  # noqa: E402
 from infoclimat.parsing import (  # noqa: E402
@@ -28,10 +28,17 @@ from stubs import UpdateFailed  # noqa: E402
 
 
 class _Response:
-    """Réponse aiohttp bouchonnée : awaitable et utilisable en `async with`."""
+    """Réponse aiohttp bouchonnée : awaitable et utilisable en `async with`.
 
-    def __init__(self, html: str) -> None:
-        self._html = html
+    Elle rend des **octets**, comme aiohttp : c'est `read()` que le
+    coordinateur appelle depuis que `text()` a été identifié comme la cause de
+    l'échec de configuration (il décode en strict une page qui n'est pas de
+    l'UTF-8 valide). Un bouchon qui rendrait directement du texte ne pourrait
+    pas attraper cette classe de bug.
+    """
+
+    def __init__(self, html: str | bytes) -> None:
+        self._raw = html.encode("utf-8") if isinstance(html, str) else html
 
     async def __aenter__(self):
         return self
@@ -42,14 +49,17 @@ class _Response:
     def raise_for_status(self) -> None:
         return None
 
-    async def text(self) -> str:
-        return self._html
+    #: Le site annonce `charset=utf-8` — y compris quand c'est faux.
+    charset = "utf-8"
+
+    async def read(self) -> bytes:
+        return self._raw
 
 
 class _Session:
     """Session aiohttp bouchonnée servant toujours la même page."""
 
-    def __init__(self, html: str) -> None:
+    def __init__(self, html: str | bytes) -> None:
         self._html = html
 
     async def get(self, url, headers=None):  # noqa: ARG002
@@ -59,14 +69,14 @@ class _Session:
 class _Hass:
     """Home Assistant bouchonné : session figée, executor synchrone."""
 
-    def __init__(self, html: str) -> None:
+    def __init__(self, html: str | bytes) -> None:
         self.session = _Session(html)
 
     async def async_add_executor_job(self, func, *args):
         return func(*args)
 
 
-def _make(html: str, station_id: str = "000FU", interval: int = 10):
+def _make(html: str | bytes, station_id: str = "000FU", interval: int = 10):
     """Coordinateur prêt à l'emploi, sans planificateur."""
     hass = _Hass(html)
     coordinator = InfoclimatCoordinator(hass, station_id, interval)
@@ -179,6 +189,69 @@ def test_un_intervalle_long_n_est_pas_raccourci():
     with pytest.raises(UpdateFailed):
         run(coordinator._async_update_data())
     assert coordinator.update_interval == timedelta(minutes=45)
+
+
+# ─────────────────────── Décodage de la page reçue ───────────────────────
+
+
+def _page_en_latin1() -> bytes:
+    """La page telle que le site la publie vraiment.
+
+    Infoclimat annonce `charset=utf-8` dans ses en-têtes et sert malgré tout
+    des octets Latin-1 : sur la vraie page, `0xe0` (« à ») apparaît deux fois.
+    On reproduit fidèlement ce mélange en remplaçant un « é » UTF-8 par son
+    équivalent Latin-1.
+    """
+    brut = load_fixture_bytes("station_pluie.html")
+    assert b"\xc3\xa9" in brut, "la fixture doit contenir un caractère accentué"
+    return brut.replace(b"\xc3\xa9", b"\xe9", 1)
+
+
+def test_page_latin1_ne_bloque_plus_le_cycle():
+    """Régression : `response.text()` levait `UnicodeDecodeError` sur cette
+    page. L'exception n'était ni une `aiohttp.ClientError` ni une erreur de
+    parsing, donc elle traversait les `except`, faisait échouer la
+    configuration, et **toutes les entités restaient indisponibles** — sans
+    rien dans le message qui permette de comprendre."""
+    coordinator, _ = _make(_page_en_latin1())
+    data = run(coordinator._async_update_data())
+
+    assert data["temperature"] == 12.4
+    assert data["pluie_24h"] == 12.4
+
+
+class _ReponseIllisible:
+    """Réponse dont la lecture lève une erreur d'encodage."""
+
+    charset = "utf-8"
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+    def raise_for_status(self) -> None:
+        return None
+
+    async def read(self) -> bytes:
+        raise UnicodeDecodeError("utf-8", b"\xe0", 0, 1, "invalid continuation byte")
+
+
+class _SessionIllisible:
+    async def get(self, url, headers=None):  # noqa: ARG002
+        return _ReponseIllisible()
+
+
+def test_erreur_d_encodage_devient_un_message_lisible():
+    """Ceinture et bretelles : si un décodage échouait malgré tout, l'échec
+    doit ressortir en `UpdateFailed` expliqué. C'est précisément ce qui
+    manquait — l'exception brute traversait les `except` et faisait échouer la
+    configuration, laissant toutes les entités indisponibles sans explication."""
+    coordinator, hass = _make("")
+    hass.session = _SessionIllisible()
+    with pytest.raises(UpdateFailed, match="injoignable"):
+        run(coordinator._async_update_data())
 
 
 # ──────────────────────── Fraîcheur du relevé ────────────────────────

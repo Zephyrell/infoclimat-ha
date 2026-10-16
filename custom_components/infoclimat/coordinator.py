@@ -30,6 +30,7 @@ from .parsing import (
     InfoclimatParseError,
     ObservationTableNotFoundError,
     StationWithoutDataError,
+    decode_page,
     parse_station_page,
 )
 
@@ -156,8 +157,10 @@ class InfoclimatCoordinator(DataUpdateCoordinator):
                 )
                 async with response:
                     response.raise_for_status()
-                    return await response.text()
-        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+                    # `response.text()` decode en strict et lève sur la
+                    # page d'Infoclimat, qui annonce utf-8 sans l'être.
+                    return decode_page(await response.read(), response.charset)
+        except (aiohttp.ClientError, asyncio.TimeoutError, UnicodeError) as err:
             raise UpdateFailed(
                 f"Page Infoclimat injoignable pour la station "
                 f"{self._station_id} : {err}"

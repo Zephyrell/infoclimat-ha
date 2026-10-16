@@ -11,11 +11,12 @@ import re
 
 import pytest
 
-from conftest import load_fixture
+from conftest import load_fixture, load_fixture_bytes
 from parsing import (
     AntiBotChallengeError,
     ObservationTableNotFoundError,
     StationWithoutDataError,
+    decode_page,
     parse_station_page,
 )
 from parsing.dom import parse_html
@@ -289,3 +290,50 @@ def test_rapport_decrit_ce_qui_s_est_passe():
     assert "relevé=11h30" in resume
     # Les champs absents sont énumérés, pas cachés
     assert "pluie_6h" in resume
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 10. Décodage des octets reçus
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_decode_page_ne_leve_jamais_sur_une_page_mixte():
+    """Régression du bug qui a mis l'intégration hors service.
+
+    Infoclimat annonce `charset=utf-8` et publie du Latin-1. `response.text()`
+    décodait en strict et levait `UnicodeDecodeError`, ce qui faisait échouer
+    la configuration de l'intégration : toutes les entités indisponibles,
+    indéfiniment, sans que le message le laisse deviner.
+    """
+    mixte = load_fixture_bytes("station_pluie.html").replace(b"\xc3\xa9", b"\xe9", 1)
+
+    with pytest.raises(UnicodeDecodeError):
+        mixte.decode("utf-8")  # ce que faisait aiohttp
+
+    texte = decode_page(mixte, "utf-8")  # ce que fait l'intégration
+    assert texte.startswith("<!DOCTYPE html>") or "resptable-releves" in texte
+
+
+def test_decode_page_ne_leve_sur_aucune_entree():
+    """La frontière octets → texte ne doit jamais faire tomber l'intégration."""
+    for brut in (b"", b"\xff\xfe", b"\xe0" * 100, bytes(range(256))):
+        assert isinstance(decode_page(brut), str)
+        assert isinstance(decode_page(brut, "utf-8"), str)
+        assert isinstance(decode_page(brut, "cp1252"), str)
+        assert isinstance(decode_page(brut, "pas-un-vrai-codec"), str)
+
+
+def test_decode_page_respecte_le_charset_annonce():
+    """Quand le serveur dit la vérité, on le croit."""
+    latin1 = "Température à la station".encode("cp1252")
+    assert decode_page(latin1, "cp1252") == "Température à la station"
+
+
+def test_decode_page_conserve_l_accent_et_le_parseur_suit():
+    """L'octet fautif est remplacé, mais les mesures restent intactes."""
+    mixte = load_fixture_bytes("station_pluie.html").replace(b"\xc3\xa9", b"\xe9", 1)
+
+    observation = parse_station_page(decode_page(mixte, "utf-8"))
+
+    assert observation.data["temperature"] == 12.4
+    assert observation.data["pluie_24h"] == 12.4

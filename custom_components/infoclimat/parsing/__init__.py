@@ -28,6 +28,7 @@ from .antibot import looks_like_antibot
 from .climatology import parse_climatology
 from .columns import ColumnResolution, resolve_table_columns
 from .dom import Node, parse_html
+from .encoding import decode_page
 from .fields import (
     TIME_ROLE,
     ObservationTime,
@@ -54,6 +55,7 @@ __all__ = [
     "EmptyObservationError",
     "StationObservation",
     "parse_station_page",
+    "decode_page",
     "EXPECTED_FIELDS",
     "CORE_FIELDS",
     "SLOW_ROLES",

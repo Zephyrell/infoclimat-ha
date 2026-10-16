@@ -22,7 +22,11 @@ import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent / "custom_components" / "infoclimat"))
 
-from parsing import InfoclimatParseError, parse_station_page  # noqa: E402
+from parsing import (  # noqa: E402
+    InfoclimatParseError,
+    decode_page,
+    parse_station_page,
+)
 
 DEFAULT_STATION = "000FU"
 BASE_URL = "https://www.infoclimat.fr/observations-meteo/temps-reel/{0}/{0}.html"
@@ -66,7 +70,10 @@ def fetch_page(station_id: str) -> str:
     url = BASE_URL.format(station_id)
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(request, timeout=25) as response:
-        return response.read().decode("utf-8", errors="replace")
+        # Même décodeur que l'intégration : un diagnostic qui décode
+        # autrement masque les bugs de décodage au lieu de les montrer.
+        return decode_page(response.read(),
+                           response.headers.get_content_charset())
 
 
 def report_station(station_id: str, html: str) -> bool:

@@ -28,3 +28,8 @@ if str(ROOT / "custom_components") not in sys.path:
 def load_fixture(name: str) -> str:
     """Renvoie le HTML d'une fixture de ``tests/fixtures``."""
     return (FIXTURES / name).read_text(encoding="utf-8")
+
+
+def load_fixture_bytes(name: str) -> bytes:
+    """Renvoie les octets bruts d'une fixture, sans décodage."""
+    return (FIXTURES / name).read_bytes()
