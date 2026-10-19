@@ -152,4 +152,12 @@ class InfoclimatSensor(CoordinatorEntity, SensorEntity):
                 if key in data:
                     attrs[key] = data[key]
 
+        # La cellule « Pluie » porte aussi le cumul de l'intervalle de la
+        # ligne, dont l'unité varie (mm/10mn ou mm/1h selon le relevé). Le
+        # capteur, lui, est en mm/h ; le cumul brut reste consultable ici.
+        if self._sensor_key == "pluie_1h":
+            for key in ("pluie_cumul_intervalle", "pluie_intervalle_min"):
+                if key in data:
+                    attrs[key] = data[key]
+
         return attrs or None

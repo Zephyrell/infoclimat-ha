@@ -9,6 +9,63 @@ page réelle — le mentionner sinon.
 
 ---
 
+## 2026-10-16 — Le capteur « Pluie » surestimait d'un facteur 6 (v1.3.1 → v1.3.2)
+
+### Le symptôme
+
+Signalé par Zephyrell après la remise en service : Home Assistant affiche
+`0.4 mm/h` alors que le site affiche `0.4 mm/10min`. L'échelle du site change
+selon les relevés.
+
+### La cause
+
+La cellule « Pluie » contient **deux mesures distinctes** :
+
+```html
+<td>
+  0.4 <span class="tab-units-v">mm/10mn</span>   ← cumul sur l'intervalle de la ligne
+  <br>
+  <a class="button-rr-pluvio" title="<table…>…</table>">  ← cumuls 3/6/12/24 h
+  <span>2.6 <span class="tab-units-v">mm/h</span></span>   ← débit calculé par le site
+</td>
+```
+
+Le premier nombre est un cumul dont **l'unité dépend de la ligne** : `mm/10mn`
+sur les relevés déciminutés, `mm/1h` sur les lignes horaires. L'extracteur
+prenait ce premier nombre et l'étiquetait `mm/h` : à 0,4 mm par 10 minutes, la
+pluie réelle est de 2,4 mm/h, six fois plus.
+
+Second défaut dans la même fonction : `parse_rain_tooltip` lit un `Pluie/1h`
+**juste** (2,6 mm sur la dernière heure), mais `result.setdefault(...)` ne
+l'écrasait pas — la bonne valeur était donc lue puis jetée, au profit du
+cumul déciminuté.
+
+Vérifié sur la page réelle : le `mm/h` affiché par le site est **toujours
+égal** au `Pluie/1h` de l'infobulle quand celle-ci est présente. C'est bien une
+intensité horaire, pas une accumulation à l'instant.
+
+### Le correctif
+
+`_rain` lit la cellule en deux temps, au lieu de prendre son premier nombre :
+
+1. le débit explicite `Xmm/h` → `pluie_1h` ;
+2. à défaut, le `Pluie/1h` de l'infobulle ;
+3. à défaut, le cumul converti : `cumul × 60 / intervalle_en_minutes`.
+
+Les deux formes de la cellule sont conservées : `pluie_cumul_intervalle` et
+`pluie_intervalle_min` deviennent des attributs du capteur « Pluie (1h) »,
+donc rien n'est perdu et l'unité variable reste visible.
+
+### État vérifié
+
+- 52 tests. Six formes de cellule couvertes : `mm/10mn` + débit, `mm/1h` +
+  débit, débit seul (`4.8mm/h`), cumul seul (`0.2 mm/10mn` → 1,2 mm/h),
+  `0 mm/1h`, cellule vide.
+- Site réel : `000FU` à 19h50 affiche `0.4 mm/10mn 2.6mm/h` → `pluie_1h=2.6`,
+  cumul `0.4 mm sur 10 min`. `00001`, sec, → `0.0` avec les cumuls d'infobulle.
+
+---
+
 ## 2026-10-16 — Toutes les entités indisponibles (v1.3.0 → v1.3.1)
 
 ### Le symptôme

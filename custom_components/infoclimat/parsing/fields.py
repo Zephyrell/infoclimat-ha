@@ -29,6 +29,8 @@ __all__ = [
     "parse_observation_time",
     "ObservationTime",
     "parse_rain_tooltip",
+    "parse_rain_amount",
+    "parse_rain_rate",
     "TIME_ROLE",
 ]
 
@@ -41,6 +43,13 @@ _HOURS_RE = re.compile(r"(\d+)\s*h")
 _WIND_DIRECTION_RE = re.compile(r"Vent de direction\s*([\d.]+)")
 _RAIN_GUST_RE = re.compile(r"raf\.?\s*([-+]?\d+(?:[.,]\d+)?)")
 _HPA_VARIATION_RE = re.compile(r"([-+]?\d+(?:[.,]\d+)?)\s*hPa")
+#: Cumul sur l'intervalle de la ligne : « 0.4 mm/10mn », « 1.8 mm/1h ».
+#: Le multiplicateur est obligatoire, sinon « 2.6mm/h » serait capté aussi.
+_RAIN_AMOUNT_RE = re.compile(
+    r"([-+]?\d+(?:[.,]\d+)?)\s*mm\s*/\s*(\d+)\s*(mn|min|h)", re.IGNORECASE
+)
+#: Intensité déjà calculée par le site : « 2.6mm/h ».
+_RAIN_RATE_RE = re.compile(r"([-+]?\d+(?:[.,]\d+)?)\s*mm\s*/\s*h", re.IGNORECASE)
 
 #: Rôle → fonction d'extraction.
 EXTRACTORS: dict[str, Callable[[Node], dict[str, Any]]] = {}
@@ -195,15 +204,74 @@ def parse_rain_tooltip(title_html: str) -> dict[str, float]:
     return result
 
 
+def parse_rain_amount(text: str) -> tuple[float | None, int | None]:
+    """Cumul de pluie de la cellule et intervalle, en minutes.
+
+    Lit « 0.4 mm/10mn » → ``(0.4, 10)`` et « 1.8 mm/1h » → ``(1.8, 60)``.
+    """
+    match = _RAIN_AMOUNT_RE.search(text)
+    if match is None:
+        return None, None
+    amount = float(match.group(1).replace(",", "."))
+    count = int(match.group(2))
+    minutes = count * 60 if match.group(3).lower() == "h" else count
+    return amount, minutes
+
+
+def parse_rain_rate(text: str) -> float | None:
+    """Débit déjà exprimé en mm/h par le site : « 2.6mm/h » → ``2.6``."""
+    match = _RAIN_RATE_RE.search(text)
+    return float(match.group(1).replace(",", ".")) if match else None
+
+
 @extractor("pluie_1h")
 def _rain(cell: Node) -> dict[str, Any]:
-    """Pluie sur 1 h, plus les cumuls 3/6/12/24 h de l'infobulle."""
-    result: dict[str, Any] = {"pluie_1h": _cell_value(cell)}
+    """Intensité de pluie (mm/h), plus les cumuls 3/6/12/24 h.
+
+    La cellule mêle **deux mesures** :
+
+        0.4 <span>mm/10mn</span> … 2.6 <span>mm/h</span>
+
+    La première est un cumul dont l'unité change d'une ligne à l'autre — par
+    10 minutes sur les relevés déciminutés, par heure sur les lignes horaires.
+    La prendre telle quelle pour un capteur en mm/h surestime la pluie d'un
+    facteur 6. La seconde est le débit calculé par le site, et c'est lui que
+    porte le capteur « Pluie (1h) ».
+
+    Quand le débit n'est pas affiché, on le reconstitue à partir du cumul et
+    de l'intervalle ; à défaut, on reprend le « Pluie/1h » de l'infobulle.
+    Les deux formes de la cellule sont conservées : le cumul et son intervalle
+    deviennent des attributs, rien n'est perdu.
+    """
+    text = cell.text()
+    tooltip: dict[str, float] = {}
     for link in cell.find_all("a"):
         title = link.get("title") or ""
         if "minitable" in title or "Pluie/" in title:
-            for key, value in parse_rain_tooltip(title).items():
-                result.setdefault(key, value)
+            tooltip = parse_rain_tooltip(title)
+            break
+
+    rate = parse_rain_rate(text)
+    amount, minutes = parse_rain_amount(text)
+
+    result: dict[str, Any] = {}
+    if rate is not None:
+        result["pluie_1h"] = rate
+    elif "pluie_1h" in tooltip:
+        result["pluie_1h"] = tooltip["pluie_1h"]
+    elif amount is not None and minutes:
+        # Repli : un cumul sur 10 min vaut six fois plus en débit horaire.
+        result["pluie_1h"] = round(amount * 60 / minutes, 2)
+    else:
+        result["pluie_1h"] = None
+
+    if amount is not None:
+        result["pluie_cumul_intervalle"] = amount
+        result["pluie_intervalle_min"] = minutes
+
+    for key, value in tooltip.items():
+        if key != "pluie_1h":
+            result[key] = value
     return result
 
 

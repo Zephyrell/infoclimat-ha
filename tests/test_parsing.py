@@ -20,6 +20,7 @@ from parsing import (
     parse_station_page,
 )
 from parsing.dom import parse_html
+from parsing.fields import extract_role
 
 # ──────────────────────────────────────────────────────────────────────
 # 1. Le bug d'origine : une table HTML imbriquée DANS un attribut
@@ -337,3 +338,71 @@ def test_decode_page_conserve_l_accent_et_le_parseur_suit():
 
     assert observation.data["temperature"] == 12.4
     assert observation.data["pluie_24h"] == 12.4
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 11. La pluie : cumul d'intervalle ou débit horaire ?
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _cellule(html: str):
+    """Une cellule <td> isolée, prête pour un extracteur."""
+    return parse_html(f"<td>{html}</td>").find("td")
+
+
+def test_pluie_deciminutee_porte_le_debit_du_site():
+    """La cellule « 0.4 mm/10mn 2.6mm/h » contient deux mesures.
+
+    Prendre la première pour un débit en mm/h surestime la pluie d'un facteur
+    six : c'est exactement ce que faisait l'extracteur avant 1.3.2.
+    """
+    resultat = extract_role("pluie_1h", _cellule("0.4 mm/10mn 2.6mm/h"))
+    assert resultat["pluie_1h"] == 2.6
+    assert resultat["pluie_1h"] != 0.4
+
+
+def test_pluie_horaire_porte_le_debit_du_site():
+    resultat = extract_role("pluie_1h", _cellule("1.8 mm/1h 4.8mm/h"))
+    assert resultat["pluie_1h"] == 4.8
+
+
+def test_pluie_sans_debit_explicite_est_convertie():
+    """Pas de mm/h affiché : on reconstitue le débit depuis l'intervalle."""
+    resultat = extract_role("pluie_1h", _cellule("0.2 mm/10mn"))
+    assert resultat["pluie_1h"] == 1.2  # 0.2 mm en 10 min = 1.2 mm/h
+
+
+def test_pluie_debit_seul():
+    """Certaines lignes n'affichent que le débit, sans cumul."""
+    resultat = extract_role("pluie_1h", _cellule("4.8mm/h"))
+    assert resultat["pluie_1h"] == 4.8
+
+
+def test_pluie_absente():
+    resultat = extract_role("pluie_1h", _cellule(""))
+    assert resultat["pluie_1h"] is None
+
+
+def test_pluie_conserve_le_cumul_d_intervalle():
+    """Rien n'est perdu : le cumul brut et son intervalle restent lisibles."""
+    resultat = extract_role("pluie_1h", _cellule("0.4 mm/10mn 2.6mm/h"))
+    assert resultat["pluie_cumul_intervalle"] == 0.4
+    assert resultat["pluie_intervalle_min"] == 10
+
+
+def test_pluie_deciminutee_dans_le_cycle_complet():
+    """De bout en bout : la ligne la plus récente du tableau est bien celle
+    qu'on lit, et son débit n'est pas le cumul déciminuté."""
+    # Dans le HTML, le nombre et l'unité sont deux nœuds distincts : on
+    # remplace donc la cellule telle qu'elle est écrite, pas son texte rendu.
+    html = load_fixture("station_pluie.html").replace(
+        '<td>2.4 <span class="tab-units-v">mm/1h</span>',
+        '<td>0.4 <span class="tab-units-v">mm/10mn</span>'
+        '<span>2.6 <span class="tab-units-v">mm/h</span></span>',
+        1,
+    )
+    observation = parse_station_page(html)
+
+    assert observation.data["pluie_1h"] == 2.6  # et non 0.4, ni 2.4
+    assert observation.data["pluie_cumul_intervalle"] == 0.4
+    assert observation.data["heure_locale"] == "11h30"

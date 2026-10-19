@@ -165,6 +165,19 @@ Le test `test_regression_l_ancien_parser_perdait_la_ligne_pluvieuse`
 conserve cet ancien découpage pour documenter le bug ; il échouerait si
 l'on revenait à cette approche.
 
+### Le capteur Pluie : mm/10mn ou mm/1h ?
+
+La cellule « Pluie » du site **mélange deux mesures** : un cumul sur
+l'intervalle de la ligne — `0.4 mm/10mn` sur les relevés déciminutés,
+`1.8 mm/1h` sur les lignes horaires — et un débit déjà exprimé en `mm/h`.
+Prendre le premier nombre pour un débit surestime la pluie d'un facteur six,
+puisque l'unité change d'une ligne à l'autre.
+
+Le capteur **Pluie (1h)** porte donc l'intensité en `mm/h` telle que le site la
+calcule, à défaut le `Pluie/1h` de l'infobulle, à défaut le cumul converti.
+Le cumul brut de l'intervalle reste consultable en attributs :
+`pluie_cumul_intervalle` et `pluie_intervalle_min`.
+
 ### Toutes les entités indisponibles, et « Échec de la configuration »
 
 Infoclimat annonce `charset=utf-8` dans ses en-têtes HTTP **et publie du
