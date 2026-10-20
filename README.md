@@ -35,7 +35,7 @@ disparition d'une colonne ne cassent rien. Voir
 | Température min du jour | `temperature` | °C | 🔸 |
 | Rafale max du jour | — | km/h | 🔸 |
 | Pluie max/1h du jour | `precipitation_intensity` | mm/h | 🔸 |
-| Pluie cumul jour | `precipitation` | mm | 🔸 |
+| Pluie cumul jour (6h–6h UTC) | `precipitation` | mm | 🔸 |
 | Pluie cumul (3h) | `precipitation` | mm | 🔸 |
 | Pluie cumul (6h) | `precipitation` | mm | 🔸 |
 | Pluie cumul (12h) | `precipitation` | mm | 🔸 |
@@ -205,6 +205,17 @@ Les attributs `pluie_heure_fixe` (l'heure d'ancrage) et
 Les cumuls 3/6/12/24 h débordent donc de moins d'une heure : sans connaître
 l'incrément qui sort de la fenêtre par le haut, c'est l'approximation la plus
 fidèle possible à partir de ce que publie le site.
+
+Le site publie de toute façon un **« Cumul 24h glissantes »** explicite dans
+sa climatologie (mention « en direct ») : c'est cette valeur que reprend
+`pluie_24h` quand la section est présente, la reconstitution ci-dessus ne
+servant plus que de repli.
+
+Ne pas confondre avec le **« Cumul du jour »**, qui couvre la journée
+synoptique **6h–6h UTC** — soit 8h–8h en heure d'été, 7h–7h en heure d'hiver.
+C'est le capteur « Pluie cumul jour (6h–6h UTC) » : il repart à 8h du matin
+(heure d'été), pas à minuit, et affiche donc une valeur très inférieure au
+cumul 24 h glissant au sortir d'une nuit pluvieuse.
 
 ### Toutes les entités indisponibles, et « Échec de la configuration »
 

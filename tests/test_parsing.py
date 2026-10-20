@@ -19,6 +19,7 @@ from parsing import (
     decode_page,
     parse_station_page,
 )
+from parsing.climatology import parse_climatology
 from parsing.dom import parse_html
 from parsing.fields import extract_role, parse_rain_tooltip
 
@@ -190,6 +191,37 @@ def test_climatologie_et_dju_decimaux():
     assert obs["pluie_cumul_jour"] == 12.4
     assert obs["dju_chauffe"] == 5.4
     assert obs["dju_froid"] == 0.0
+
+
+def test_cumul_24h_glissantes_et_cumul_du_jour_sont_deux_fenetres():
+    """Le site publie côte à côte le cumul 24 h glissant et le cumul du jour
+    synoptique (6h–6h UTC). Les confondre fait croire à un cumul 24 h perdu."""
+    page = (
+        '<table class="recap-clim-resp">'
+        '<tr><td>Cumul du jour<span class="recap-clim-comment">'
+        '6h à 6h(J+1) partiel</span></td>'
+        '<td colspan=2><div><b>21</b>mm</div></td></tr>'
+        '<tr><td>Cumul 24h glissantes<span class="recap-clim-comment">'
+        'en direct</span></td>'
+        '<td colspan=2><div><b>71.2</b>mm</div></td></tr>'
+        '</table>'
+    )
+    clim = parse_climatology(parse_html(page))
+    assert clim["pluie_cumul_jour"] == 21.0
+    assert clim["pluie_24h"] == 71.2
+
+
+def test_cumul_24h_glissantes_prime_sur_la_reconstitution():
+    """Quand la climatologie donne le 24 h « en direct », il remplace le
+    cumul reconstitué à partir de la dernière heure pile."""
+    html = load_fixture("station_pluie_deciminutee.html").replace(
+        "</body>",
+        '<table class="recap-clim-resp"><tr>'
+        '<td>Cumul 24h glissantes<span class="recap-clim-comment">'
+        'en direct</span></td><td><b>70</b>mm</td></tr></table></body>',
+    )
+    obs = parse_station_page(html)
+    assert obs.data["pluie_24h"] == 70.0
 
 
 # ──────────────────────────────────────────────────────────────────────

@@ -9,6 +9,31 @@ page réelle — le mentionner sinon.
 
 ---
 
+## 2026-10-20 — Le « Cumul du jour » n'est pas le cumul 24 h (v1.4.1)
+
+Signalé par Zephyrell : Home Assistant affichait **21 mm** de cumul 24 h quand
+le site en annonçait **71**. Vérifié sur la page réelle de `000FU` à 20h09,
+avec l'URL exacte utilisée par l'intégration : `pluie_24h` valait bien
+**71.2 mm**, et chaque version publiée (1.3.0, 1.3.1, 1.3.2, 1.4.0) donne le
+même résultat sur cette page. Le calcul ne « démarre » donc pas au relevé
+courant et n'a rien perdu de la nuit.
+
+Les 21 mm sont le **« Cumul du jour »** de la climatologie du site. Ce n'est
+pas une fenêtre de 24 h : le site l'annote lui-même « **6h à 6h (J+1)** »,
+« partiel » — la journée synoptique, en UTC (soit 8h–8h en heure d'été, 7h–7h
+en heure d'hiver). À 20h09, ce cumul valait 21.0 mm, exactement comme
+`Pluie/12h` : coïncidence de l'heure, pas un compteur qui repart au relevé.
+
+Deux corrections pour que la confusion ne se reproduise pas :
+
+- le capteur `pluie_cumul_jour` s'appelle désormais **« Pluie cumul jour
+  (6h–6h UTC) »** ;
+- le site publie dans sa climatologie un **« Cumul 24h glissantes » en direct**
+  (71.2 mm sur `000FU`), que l'intégration reprend tel quel pour `pluie_24h`.
+  Il est appliqué après la reconstitution et la remplace ; celle-ci reste le
+  repli quand la section est absente (station sans pluviomètre, page
+  incomplète).
+
 ## 2026-10-20 — Pluie : trois mesures, un seul capteur qui se figeait (v1.3.2 → v1.4.0)
 
 ### Le symptôme

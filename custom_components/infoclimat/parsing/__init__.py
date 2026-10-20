@@ -221,7 +221,9 @@ def parse_station_page(html: str) -> StationObservation:
         data["obs_time_utc"] = moment.moment_utc.isoformat(timespec="minutes")
     _attach_station_info(info, data)
 
-    # 9. Climatologie du jour.
+    # 9. Climatologie du jour. Appliquée après la recomposition : elle porte
+    #    le « Cumul 24h glissantes » publié en direct par le site, qui doit
+    #    primer sur notre estimation (plus frais et exact).
     data.update(parse_climatology(scope))
 
     # 10. Vérifier qu'il reste quelque chose d'exploitable.
@@ -326,6 +328,10 @@ def _derive_rain_totals(
     Pour l'heure écoulée en revanche, le calcul est exact : on additionne les
     intervalles de dix minutes de la fenêtre, la ligne horaire contribuant
     pour ses dix dernières minutes (lues dans l'infobulle, ``Pluie/10mn``).
+
+    Le site publie par ailleurs un « Cumul 24h glissantes » en direct dans sa
+    climatologie. Appliqué après cette fonction, il remplace le 24 h
+    reconstitué : c'est la valeur de référence quand la section existe.
     """
     column = columns.index_of("pluie_1h")
     if column is None:

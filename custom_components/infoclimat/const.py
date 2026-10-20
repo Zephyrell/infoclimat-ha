@@ -151,7 +151,7 @@ SENSOR_TYPES = {
         "enabled": False,
     },
     "pluie_cumul_jour": {
-        "name": "Pluie cumul jour",
+        "name": "Pluie cumul jour (6h–6h UTC)",
         "device_class": "precipitation",
         "unit": "mm",
         "icon": None,

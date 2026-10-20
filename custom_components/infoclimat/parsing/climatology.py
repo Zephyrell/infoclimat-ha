@@ -27,7 +27,14 @@ CLIMATOLOGY_LABELS: dict[str, str] = {
     "temperature minimale": "temp_min_jour",
     "rafale maximale": "rafale_max_jour",
     "cumul maxi en 1h": "pluie_max_1h",
+    # Fenêtre synoptique 6h–6h UTC, pas 24 h glissantes : « partiel » veut
+    # dire que la journée est en cours. Le site publie le vrai 24 h glissant
+    # dans une section distincte, reprise ci-dessous.
     "cumul du jour": "pluie_cumul_jour",
+    # Valeur « en direct » publiée par le site : elle prime sur la
+    # reconstitution de :func:`parsing._derive_rain_totals` (appliquée avant
+    # la climatologie dans :func:`parse_station_page`).
+    "cumul 24h glissantes": "pluie_24h",
 }
 
 #: Repères de la ligne « Degrés Jour Unifiés ».
