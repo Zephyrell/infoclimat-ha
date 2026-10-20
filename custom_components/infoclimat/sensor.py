@@ -25,6 +25,9 @@ _LOGGER = logging.getLogger(__name__)
 #: Capteurs dont l'état est un texte : pas de statistiques à en tirer.
 _TEXT_SENSORS = frozenset({"pression_tendance"})
 
+#: Capteurs de cumul de pluie, reconstitués à partir de la dernière heure fixe.
+_RAIN_TOTALS = frozenset({"pluie_1h", "pluie_3h", "pluie_6h", "pluie_12h", "pluie_24h"})
+
 #: Métadonnées recopiées sur chaque capteur : de quoi juger la fraîcheur et
 #: l'origine de la mesure sans ouvrir le journal.
 _METADATA_KEYS = (
@@ -152,11 +155,16 @@ class InfoclimatSensor(CoordinatorEntity, SensorEntity):
                 if key in data:
                     attrs[key] = data[key]
 
-        # La cellule « Pluie » porte aussi le cumul de l'intervalle de la
-        # ligne, dont l'unité varie (mm/10mn ou mm/1h selon le relevé). Le
-        # capteur, lui, est en mm/h ; le cumul brut reste consultable ici.
+        # Les cumuls de pluie sont reconstitués à partir de la dernière
+        # heure fixe et des relevés déciminutés qui la suivent. On expose la
+        # cellule brute de la ligne retenue et le point d'ancrage du calcul,
+        # pour que la valeur reste vérifiable à la main.
         if self._sensor_key == "pluie_1h":
             for key in ("pluie_cumul_intervalle", "pluie_intervalle_min"):
+                if key in data:
+                    attrs[key] = data[key]
+        if self._sensor_key in _RAIN_TOTALS:
+            for key in ("pluie_heure_fixe", "pluie_depuis_heure_fixe"):
                 if key in data:
                     attrs[key] = data[key]
 

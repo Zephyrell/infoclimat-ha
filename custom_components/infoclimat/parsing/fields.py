@@ -13,6 +13,7 @@ peut donc pas les tromper.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -30,7 +31,7 @@ __all__ = [
     "ObservationTime",
     "parse_rain_tooltip",
     "parse_rain_amount",
-    "parse_rain_rate",
+    "parse_rain_intensity",
     "TIME_ROLE",
 ]
 
@@ -39,7 +40,6 @@ TIME_ROLE = "heure"
 #: Nombre au format « 12 », « -0.4 », « 1,2 ». Le signe n'est capté que s'il
 #: est collé au chiffre, pour ne pas transformer « 6h à 6h » en « -6 ».
 _NUMBER_RE = re.compile(r"(?<![\d.,])[-+]?\d+(?:[.,]\d+)?(?![\d])")
-_HOURS_RE = re.compile(r"(\d+)\s*h")
 _WIND_DIRECTION_RE = re.compile(r"Vent de direction\s*([\d.]+)")
 _RAIN_GUST_RE = re.compile(r"raf\.?\s*([-+]?\d+(?:[.,]\d+)?)")
 _HPA_VARIATION_RE = re.compile(r"([-+]?\d+(?:[.,]\d+)?)\s*hPa")
@@ -48,7 +48,7 @@ _HPA_VARIATION_RE = re.compile(r"([-+]?\d+(?:[.,]\d+)?)\s*hPa")
 _RAIN_AMOUNT_RE = re.compile(
     r"([-+]?\d+(?:[.,]\d+)?)\s*mm\s*/\s*(\d+)\s*(mn|min|h)", re.IGNORECASE
 )
-#: Intensité déjà calculée par le site : « 2.6mm/h ».
+#: Intensité affichée par le site : « 2.6mm/h ».
 _RAIN_RATE_RE = re.compile(r"([-+]?\d+(?:[.,]\d+)?)\s*mm\s*/\s*h", re.IGNORECASE)
 
 #: Rôle → fonction d'extraction.
@@ -180,13 +180,38 @@ def _pressure(cell: Node) -> dict[str, Any]:
 
 # ───────────────────────────── Pluie ─────────────────────────────
 
+#: Libellé d'infobulle → clé de relevé. Le site ne dit plus « Pluie/1h » :
+#: il expose l'intensité **maximale de l'heure écoulée** et l'intensité
+#: **instantanée**, qui ne sont pas des cumuls.
+_RAIN_TOOLTIP_FIELDS = {
+    "intensite max/1h": "pluie_intensite_max_1h",
+    "intensite instantanee": "pluie_instantannee",
+}
+
+#: Pas de cumul de l'infobulle : « Pluie/3h », « Pluie/10mn »…
+_RAIN_TOOLTIP_STEP_RE = re.compile(
+    r"pluie\s*/\s*(\d+)\s*(mn|min|h)", re.IGNORECASE
+)
+
+
+def _normalize_label(text: str) -> str:
+    """Minuscules, sans accents, sans espaces ni ponctuation superflus."""
+    decomposed = unicodedata.normalize("NFD", text)
+    stripped = "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
+    return " ".join(stripped.lower().split()).strip(" :")
+
 
 def parse_rain_tooltip(title_html: str) -> dict[str, float]:
-    """Cumuls pluviométriques cachés dans l'infobulle de la cellule Pluie.
+    """Mesures cachées dans l'infobulle de la cellule Pluie.
 
-    Le ``title`` contient un mini-tableau HTML (jusqu'à quatre cumuls) :
+    Le ``title`` contient un mini-tableau HTML. Selon le relevé, il porte
+    des cumuls et/ou des intensités :
 
-        <table><tr><td>Pluie/3h :</td><td>0mm</td></tr>…</table>
+        <table><tr><td><b>Intensité max/1h :</b></td><td>10.2mm/h</td></tr>
+               <tr><td><b>Intensité instantanée :</b></td><td>4.8mm/h</td></tr>
+               <tr><td><b>Pluie/10mn :</b></td><td>1mm</td></tr>
+               <tr><td><b>Pluie/3h :</b></td><td>15.4mm</td></tr>
+               <tr><td><b>Pluie/24h :</b></td><td>63.8mm</td></tr></table>
 
     C'est ce fragment qui faisait dérailler les parsers à base de regex.
     """
@@ -195,12 +220,27 @@ def parse_rain_tooltip(title_html: str) -> dict[str, float]:
         cells = row_cells(row)
         if len(cells) < 2:
             continue
-        hours = _HOURS_RE.search(cells[0].text())
-        if not hours:
-            continue
+        label = _normalize_label(cells[0].text())
         value = first_number(cells[1].text())
-        if value is not None:
-            result.setdefault(f"pluie_{int(hours.group(1))}h", value)
+        if value is None:
+            continue
+
+        key = _RAIN_TOOLTIP_FIELDS.get(label)
+        if key is not None:
+            result.setdefault(key, value)
+            continue
+
+        step = _RAIN_TOOLTIP_STEP_RE.search(label)
+        if step is None:
+            continue
+        count = int(step.group(1))
+        if step.group(2).lower() == "h":
+            result.setdefault(f"pluie_{count}h", value)
+        elif count == 10:
+            # Intervalle de référence des relevés déciminutés. La ligne
+            # horaire n'en publie que le dernier, ce qui sert à compléter
+            # la fenêtre d'une heure (voir _rolling_hour).
+            result.setdefault("pluie_10mn", value)
     return result
 
 
@@ -218,15 +258,20 @@ def parse_rain_amount(text: str) -> tuple[float | None, int | None]:
     return amount, minutes
 
 
-def parse_rain_rate(text: str) -> float | None:
-    """Débit déjà exprimé en mm/h par le site : « 2.6mm/h » → ``2.6``."""
+def parse_rain_intensity(text: str) -> float | None:
+    """Intensité en clair dans la cellule : « 2.6mm/h » → ``2.6``.
+
+    Ce n'est **pas** le débit instantané : c'est l'intensité maximale de la
+    dernière heure, ce que confirme l'infobulle (« Intensité max/1h »). Le
+    débit instantané, lui, n'existe que dans l'infobulle.
+    """
     match = _RAIN_RATE_RE.search(text)
     return float(match.group(1).replace(",", ".")) if match else None
 
 
 @extractor("pluie_1h")
 def _rain(cell: Node) -> dict[str, Any]:
-    """Intensité de pluie (mm/h), plus les cumuls 3/6/12/24 h.
+    """Mesures pluviométriques d'une cellule, sans aucun calcul de cumul.
 
     La cellule mêle **deux mesures** :
 
@@ -234,44 +279,34 @@ def _rain(cell: Node) -> dict[str, Any]:
 
     La première est un cumul dont l'unité change d'une ligne à l'autre — par
     10 minutes sur les relevés déciminutés, par heure sur les lignes horaires.
-    La prendre telle quelle pour un capteur en mm/h surestime la pluie d'un
-    facteur 6. La seconde est le débit calculé par le site, et c'est lui que
-    porte le capteur « Pluie (1h) ».
+    La seconde est l'intensité maximale de la dernière heure, pas un débit
+    instantané. Les cumuls 3/6/12/24 h et l'intensité instantanée vivent dans
+    l'infobulle.
 
-    Quand le débit n'est pas affiché, on le reconstitue à partir du cumul et
-    de l'intervalle ; à défaut, on reprend le « Pluie/1h » de l'infobulle.
-    Les deux formes de la cellule sont conservées : le cumul et son intervalle
-    deviennent des attributs, rien n'est perdu.
+    Aucun total n'est produit ici : le cumul horaire se déduit de la ligne
+    horaire et des relevés déciminutés qui la suivent (voir
+    ``_derive_rain_totals``). Cette fonction ne restitue que ce que la cellule
+    affirme explicitement.
     """
     text = cell.text()
-    tooltip: dict[str, float] = {}
+    result: dict[str, Any] = {}
+
     for link in cell.find_all("a"):
         title = link.get("title") or ""
         if "minitable" in title or "Pluie/" in title:
-            tooltip = parse_rain_tooltip(title)
+            result.update(parse_rain_tooltip(title))
             break
 
-    rate = parse_rain_rate(text)
     amount, minutes = parse_rain_amount(text)
-
-    result: dict[str, Any] = {}
-    if rate is not None:
-        result["pluie_1h"] = rate
-    elif "pluie_1h" in tooltip:
-        result["pluie_1h"] = tooltip["pluie_1h"]
-    elif amount is not None and minutes:
-        # Repli : un cumul sur 10 min vaut six fois plus en débit horaire.
-        result["pluie_1h"] = round(amount * 60 / minutes, 2)
-    else:
-        result["pluie_1h"] = None
-
     if amount is not None:
         result["pluie_cumul_intervalle"] = amount
         result["pluie_intervalle_min"] = minutes
 
-    for key, value in tooltip.items():
-        if key != "pluie_1h":
-            result[key] = value
+    # La valeur affichée en clair fait foi sur celle de l'infobulle.
+    intensity = parse_rain_intensity(text)
+    if intensity is not None:
+        result["pluie_intensite_max_1h"] = intensity
+
     return result
 
 

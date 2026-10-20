@@ -69,9 +69,23 @@ SENSOR_TYPES = {
     "pluie_1h": {
         "name": "Pluie (1h)",
         "device_class": "precipitation",
-        "unit": UnitOfVolumetricFlux.MILLIMETERS_PER_HOUR,
+        "unit": "mm",
         "icon": None,
         "enabled": True,
+    },
+    "pluie_instantannee": {
+        "name": "Pluie instantanée",
+        "device_class": "precipitation_intensity",
+        "unit": UnitOfVolumetricFlux.MILLIMETERS_PER_HOUR,
+        "icon": "mdi:weather-pouring",
+        "enabled": True,
+    },
+    "pluie_intensite_max_1h": {
+        "name": "Intensité max (1h)",
+        "device_class": "precipitation_intensity",
+        "unit": UnitOfVolumetricFlux.MILLIMETERS_PER_HOUR,
+        "icon": "mdi:weather-pouring",
+        "enabled": False,
     },
     "point_rosee": {
         "name": "Point de rosée",
@@ -131,7 +145,7 @@ SENSOR_TYPES = {
     },
     "pluie_max_1h": {
         "name": "Pluie max/1h du jour",
-        "device_class": "precipitation",
+        "device_class": "precipitation_intensity",
         "unit": UnitOfVolumetricFlux.MILLIMETERS_PER_HOUR,
         "icon": None,
         "enabled": False,

@@ -23,7 +23,9 @@ disparition d'une colonne ne cassent rien. Voir
 | Vent moyen | `wind_speed` | km/h | ✅ |
 | Rafale de vent | — | km/h | ✅ |
 | Direction du vent | — | ° | ✅ |
-| Pluie (1h) | `precipitation` | mm/h | ✅ |
+| Pluie (1h) | `precipitation` | mm | ✅ |
+| Pluie instantanée | `precipitation_intensity` | mm/h | ✅ |
+| Intensité max (1h) | `precipitation_intensity` | mm/h | 🔸 |
 | Point de rosée | `temperature` | °C | ✅ |
 | Bio-météo (ressentie) | — | — | ✅ |
 | Pression | `pressure` | hPa | ✅ |
@@ -32,7 +34,7 @@ disparition d'une colonne ne cassent rien. Voir
 | Température max du jour | `temperature` | °C | 🔸 |
 | Température min du jour | `temperature` | °C | 🔸 |
 | Rafale max du jour | — | km/h | 🔸 |
-| Pluie max/1h du jour | `precipitation` | mm/h | 🔸 |
+| Pluie max/1h du jour | `precipitation_intensity` | mm/h | 🔸 |
 | Pluie cumul jour | `precipitation` | mm | 🔸 |
 | Pluie cumul (3h) | `precipitation` | mm | 🔸 |
 | Pluie cumul (6h) | `precipitation` | mm | 🔸 |
@@ -165,18 +167,44 @@ Le test `test_regression_l_ancien_parser_perdait_la_ligne_pluvieuse`
 conserve cet ancien découpage pour documenter le bug ; il échouerait si
 l'on revenait à cette approche.
 
-### Le capteur Pluie : mm/10mn ou mm/1h ?
+### Les capteurs de pluie : trois mesures différentes
 
-La cellule « Pluie » du site **mélange deux mesures** : un cumul sur
-l'intervalle de la ligne — `0.4 mm/10mn` sur les relevés déciminutés,
-`1.8 mm/1h` sur les lignes horaires — et un débit déjà exprimé en `mm/h`.
-Prendre le premier nombre pour un débit surestime la pluie d'un facteur six,
-puisque l'unité change d'une ligne à l'autre.
+La cellule « Pluie » du site ne contient pas une mais **trois** mesures, et
+elles ne s'expriment pas dans la même unité :
 
-Le capteur **Pluie (1h)** porte donc l'intensité en `mm/h` telle que le site la
-calcule, à défaut le `Pluie/1h` de l'infobulle, à défaut le cumul converti.
-Le cumul brut de l'intervalle reste consultable en attributs :
-`pluie_cumul_intervalle` et `pluie_intervalle_min`.
+- un **cumul sur l'intervalle de la ligne** — `0.4 mm/10mn` sur les relevés
+  déciminutés, `1.8 mm/1h` sur les lignes horaires ;
+- une **intensité maximale sur la dernière heure**, affichée en `mm/h` à côté
+  de ce cumul (`2.6mm/h`) et reprise dans l'infobulle sous le nom
+  « Intensité max/1h » ;
+- une **intensité instantanée**, le débit réel au moment du relevé, qui
+  n'existe que dans l'infobulle (« Intensité instantanée »).
+
+L'intégration les expose séparément :
+
+| Capteur | Sens |
+|---|---|
+| Pluie (1h) | cumul sur les 60 dernières minutes, en mm |
+| Pluie instantanée | débit instantané, en mm/h |
+| Intensité max (1h) | intensité maximale de la dernière heure, en mm/h |
+
+Le site ne publie les cumuls 3/6/12/24 h que sur les **lignes horaires**, dans
+l'infobulle. Les lignes déciminutées qui suivent n'apportent que leur cumul de
+10 minutes. L'intégration recompose donc :
+
+- **cumul 3/6/12/24 h** = valeur de la dernière heure pile + tous les cumuls
+  déciminutés postérieurs ;
+- **cumul 1 h** = somme exacte des intervalles de 10 minutes de la dernière
+  heure, la ligne horaire contribuant pour ses 10 dernières minutes.
+
+Les attributs `pluie_heure_fixe` (l'heure d'ancrage) et
+`pluie_depuis_heure_fixe` (l'incrément ajouté) permettent de refaire le calcul
+à la main. Sur le capteur Pluie (1h), `pluie_cumul_intervalle` et
+`pluie_intervalle_min` restituent la cellule brute de la ligne retenue.
+
+Les cumuls 3/6/12/24 h débordent donc de moins d'une heure : sans connaître
+l'incrément qui sort de la fenêtre par le haut, c'est l'approximation la plus
+fidèle possible à partir de ce que publie le site.
 
 ### Toutes les entités indisponibles, et « Échec de la configuration »
 

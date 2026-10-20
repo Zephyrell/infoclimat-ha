@@ -9,6 +9,101 @@ page réelle — le mentionner sinon.
 
 ---
 
+## 2026-10-20 — Pluie : trois mesures, un seul capteur qui se figeait (v1.3.2 → v1.4.0)
+
+### Le symptôme
+
+Signalé par Zephyrell : les capteurs de pluie « ne semblent plus évoluer », et
+le cumul 24 h n'apparaît que dans les cases des heures piles. Demande
+explicite, par ailleurs : exposer la **pluie instantanée**.
+
+### Ce que la cellule contient réellement
+
+La cellule « Pluie » mêle **trois mesures** que 1.3.2 avait prises pour deux :
+
+```html
+<td>1 <span>mm/10mn</span>                      ← cumul des 10 dernières minutes
+  <a title="<table>
+      <tr><td>Intensité max/1h :</td><td>10.2mm/h</td></tr>   ← max de l'heure
+      <tr><td>Intensité instantanée :</td><td>4.8mm/h</td></tr>
+      <tr><td>Pluie/10mn :</td><td>1mm</td></tr>
+    </table>">
+  <span>10.2 <span>mm/h</span></span>            ← le même max, en clair
+</td>
+```
+
+Vérifié sur la page réelle : le `mm/h` affiché en clair est **égal** à
+« Intensité max/1h » de l'infobulle, à chaque ligne. Ce n'est ni un cumul
+horaire ni un débit instantané.
+
+### L'erreur de 1.3.2
+
+`parse_rain_tooltip` cherchait les libellés avec `_HOURS_RE = (\d+)\s*h`,
+c'est-à-dire « un nombre suivi de h », **n'importe où** dans le libellé.
+« Intensité max/1h » correspondait donc, et devenait `pluie_1h`. Le capteur
+« Pluie (1h) » de 1.3.2 publiait en réalité l'intensité maximale de l'heure :
+une valeur qui ne bouge que lorsqu'un nouveau maximum tombe, d'où l'impression
+d'un capteur figé. Sur la page du 20 octobre, elle est restée à 10.2 pendant
+quarante minutes alors qu'il tombait 1 mm toutes les dix minutes.
+
+### Les cumuls, eux, n'étaient publiés qu'à l'heure pile
+
+`Pluie/3h`, `/6h`, `/12h` et `/24h` n'existent que sur les lignes horaires.
+Quand la ligne retenue était déciminutée — c'est-à-dire presque toujours —
+les capteurs de cumul disparaissaient, ou étaient reportés en bloc depuis la
+ligne horaire par `_carry_slow_fields`.
+
+Arithmétique vérifiée sur la page réelle :
+
+- 05h00 (7.2) + 06h00 (3.8) + 07h00 (4.4) = 15.4 = `Pluie/3h` de 07h00 ;
+- 06h10…06h50 = 4.0, plus `Pluie/10mn` de 07h00 (0.4) = 4.4 = `mm/1h` de 07h00.
+
+Autrement dit : une ligne à l'heure `T` couvre `(T − 10 min, T]`, et la ligne
+horaire couvre l'heure qui s'achève, `Pluie/10mn` en étant le dernier
+dixième.
+
+### Le correctif
+
+L'extracteur ne calcule plus aucun total : il restitue séparément le cumul
+d'intervalle, l'intensité max et l'intensité instantanée. Une nouvelle étape,
+`_derive_rain_totals`, recompose les cumuls au niveau de la page :
+
+- **cumul 3/6/12/24 h** = valeur de la dernière ligne horaire + somme des
+  cumuls déciminutés postérieurs (la formule demandée) ;
+- **cumul 1 h** = somme exacte des intervalles de 10 minutes de la fenêtre,
+  la ligne horaire contribuant pour ses `Pluie/10mn` ;
+- une cellule vide sur un relevé déciminuté vaut **0 mm** dès lors que la
+  station possède un pluviomètre — c'est ainsi que le site représente l'absence
+  de pluie, et c'est ce qui effaçait les cumuls auparavant ;
+- au-delà d'une heure après la ligne horaire, aucune extension : des trous de
+  publication rendraient l'estimation fausse (comportement conservé de la
+  reprise, test `station_pluie_perimee.html`).
+
+Les cumuls 3/6/12/24 h débordent de moins d'une heure : l'incrément sortant
+par le haut de la fenêtre n'est pas publié. C'est documenté dans le README.
+
+### Changement cassant
+
+**« Pluie (1h) » passe de `mm/h` à `mm`**, parce que c'est un cumul et non une
+intensité. L'`unique_id` ne change pas : l'entité survit à la mise à jour, mais
+son unité et ses statistiques long terme changent. Deux nouveaux capteurs :
+« Pluie instantanée » (`precipitation_intensity`, mm/h, actif) et
+« Intensité max (1h) » (mm/h, inactif par défaut). `pluie_max_1h` de la
+climatologie passe aussi en `precipitation_intensity`, son unité `mm/h` étant
+invalide pour `precipitation`.
+
+### État vérifié
+
+- 52 tests, dont deux nouvelles fixtures au format réel du site
+  (`station_pluie_deciminutee.html`, `station_pluie_seche.html`).
+- Page réelle `000FU` à 07h50 : `pluie_1h = 4.4 mm`, `pluie_24h = 67.8 mm`
+  (63.8 à 07h00 + 4.0 depuis), `pluie_instantannee = 4.8 mm/h`,
+  `pluie_intensite_max_1h = 10.2 mm/h`.
+- Page réelle `00001`, sèche : `pluie_1h = 0.0`, `pluie_24h = 0.2`,
+  instantanée `0.0`.
+
+---
+
 ## 2026-10-16 — Le capteur « Pluie » surestimait d'un facteur 6 (v1.3.1 → v1.3.2)
 
 ### Le symptôme

@@ -20,7 +20,7 @@ from parsing import (
     parse_station_page,
 )
 from parsing.dom import parse_html
-from parsing.fields import extract_role
+from parsing.fields import extract_role, parse_rain_tooltip
 
 # ──────────────────────────────────────────────────────────────────────
 # 1. Le bug d'origine : une table HTML imbriquée DANS un attribut
@@ -341,7 +341,7 @@ def test_decode_page_conserve_l_accent_et_le_parseur_suit():
 
 
 # ──────────────────────────────────────────────────────────────────────
-# 11. La pluie : cumul d'intervalle ou débit horaire ?
+# 11. La pluie : cumul d'intervalle, intensité max, intensité instantanée
 # ──────────────────────────────────────────────────────────────────────
 
 
@@ -350,59 +350,101 @@ def _cellule(html: str):
     return parse_html(f"<td>{html}</td>").find("td")
 
 
-def test_pluie_deciminutee_porte_le_debit_du_site():
+def test_pluie_cellule_ne_confond_pas_cumul_et_intensite():
     """La cellule « 0.4 mm/10mn 2.6mm/h » contient deux mesures.
 
-    Prendre la première pour un débit en mm/h surestime la pluie d'un facteur
-    six : c'est exactement ce que faisait l'extracteur avant 1.3.2.
+    La première est le cumul des dix dernières minutes, la seconde
+    l'intensité maximale de l'heure — ni l'une ni l'autre n'est un cumul
+    horaire. L'extracteur les restitue séparément, sans rien additionner.
     """
     resultat = extract_role("pluie_1h", _cellule("0.4 mm/10mn 2.6mm/h"))
-    assert resultat["pluie_1h"] == 2.6
-    assert resultat["pluie_1h"] != 0.4
+
+    assert resultat["pluie_cumul_intervalle"] == 0.4
+    assert resultat["pluie_intervalle_min"] == 10
+    assert resultat["pluie_intensite_max_1h"] == 2.6
+    assert "pluie_1h" not in resultat
 
 
-def test_pluie_horaire_porte_le_debit_du_site():
-    resultat = extract_role("pluie_1h", _cellule("1.8 mm/1h 4.8mm/h"))
-    assert resultat["pluie_1h"] == 4.8
+def test_pluie_infobulle_lit_l_intensite_instantanee():
+    """L'infobulle du site expose l'intensité instantanée, le vrai débit.
 
+    Elle contient aussi « Intensité max/1h » : l'ancien parseur le prenait
+    pour un « Pluie/1h » parce qu'il cherchait « …1h » n'importe où.
+    """
+    resultat = parse_rain_tooltip(
+        "<table class='minitable-details'>"
+        "<tr><td><b>Intensit&eacute; max/1h&nbsp;:</b></td><td>10.2mm/h</td></tr>"
+        "<tr><td><b>Intensit&eacute; instantan&eacute;e&nbsp;:</b></td><td>4.8mm/h</td></tr>"
+        "<tr><td><b>Pluie/10mn :</b></td><td>1mm</td></tr>"
+        "<tr><td><b>Pluie/24h :</b></td><td>63.8mm</td></tr>"
+        "</table>"
+    )
 
-def test_pluie_sans_debit_explicite_est_convertie():
-    """Pas de mm/h affiché : on reconstitue le débit depuis l'intervalle."""
-    resultat = extract_role("pluie_1h", _cellule("0.2 mm/10mn"))
-    assert resultat["pluie_1h"] == 1.2  # 0.2 mm en 10 min = 1.2 mm/h
-
-
-def test_pluie_debit_seul():
-    """Certaines lignes n'affichent que le débit, sans cumul."""
-    resultat = extract_role("pluie_1h", _cellule("4.8mm/h"))
-    assert resultat["pluie_1h"] == 4.8
+    assert resultat["pluie_instantannee"] == 4.8
+    assert resultat["pluie_intensite_max_1h"] == 10.2
+    assert resultat["pluie_10mn"] == 1.0
+    assert resultat["pluie_24h"] == 63.8
+    assert "pluie_1h" not in resultat
 
 
 def test_pluie_absente():
+    """Cellule vide : aucune mesure inventée."""
     resultat = extract_role("pluie_1h", _cellule(""))
-    assert resultat["pluie_1h"] is None
+    assert "pluie_cumul_intervalle" not in resultat
+    assert "pluie_1h" not in resultat
 
 
-def test_pluie_conserve_le_cumul_d_intervalle():
-    """Rien n'est perdu : le cumul brut et son intervalle restent lisibles."""
-    resultat = extract_role("pluie_1h", _cellule("0.4 mm/10mn 2.6mm/h"))
-    assert resultat["pluie_cumul_intervalle"] == 0.4
-    assert resultat["pluie_intervalle_min"] == 10
+def test_pluie_heure_roulante_est_exacte():
+    """Le cumul de l'heure écoulée additionne les intervalles de dix minutes.
+
+    Relevé de 07h50 : 07h10 (1.0) + 07h20 (0.8) + 07h30 (0.6)
+    + 07h40 (0.6) + 07h50 (1.0) = 4.0 mm, plus les dix dernières minutes de
+    la ligne horaire de 07h00 (0.4 mm, lues dans l'infobulle) = 4.4 mm.
+    """
+    obs = parse_station_page(load_fixture("station_pluie_deciminutee.html"))
+
+    assert obs.data["heure_locale"] == "07h50"
+    assert obs.data["pluie_1h"] == 4.4
+    assert obs.data["pluie_cumul_intervalle"] == 1.0
+    assert obs.data["pluie_intervalle_min"] == 10
 
 
-def test_pluie_deciminutee_dans_le_cycle_complet():
-    """De bout en bout : la ligne la plus récente du tableau est bien celle
-    qu'on lit, et son débit n'est pas le cumul déciminuté."""
-    # Dans le HTML, le nombre et l'unité sont deux nœuds distincts : on
-    # remplace donc la cellule telle qu'elle est écrite, pas son texte rendu.
-    html = load_fixture("station_pluie.html").replace(
-        '<td>2.4 <span class="tab-units-v">mm/1h</span>',
-        '<td>0.4 <span class="tab-units-v">mm/10mn</span>'
-        '<span>2.6 <span class="tab-units-v">mm/h</span></span>',
-        1,
-    )
-    observation = parse_station_page(html)
+def test_pluie_cumuls_etendus_aux_releves_deciminutes():
+    """Cumul 24 h = valeur de la dernière heure fixe + les dix minutes suivies.
 
-    assert observation.data["pluie_1h"] == 2.6  # et non 0.4, ni 2.4
-    assert observation.data["pluie_cumul_intervalle"] == 0.4
-    assert observation.data["heure_locale"] == "11h30"
+    À 07h00, le site publie 63.8 mm sur 24 h, 15.4 sur 3 h, etc. Entre 07h00
+    et 07h50 il est tombé 4.0 mm, qui s'ajoutent à chaque fenêtre.
+    """
+    obs = parse_station_page(load_fixture("station_pluie_deciminutee.html"))
+
+    assert obs.data["pluie_3h"] == 19.4
+    assert obs.data["pluie_6h"] == 26.6
+    assert obs.data["pluie_12h"] == 51.4
+    assert obs.data["pluie_24h"] == 67.8
+
+    # Le calcul reste vérifiable : ancrage et incrément sont exposés.
+    assert obs.data["pluie_heure_fixe"] == "07h00"
+    assert obs.data["pluie_depuis_heure_fixe"] == 4.0
+    assert "pluie_1h" in obs.report.carried
+
+
+def test_pluie_instantanee_et_max_1h():
+    """L'intensité instantanée est celle de la ligne retenue, pas du cumul."""
+    obs = parse_station_page(load_fixture("station_pluie_deciminutee.html"))
+
+    assert obs.data["pluie_instantannee"] == 4.8
+    assert obs.data["pluie_intensite_max_1h"] == 10.2
+
+
+def test_pluie_seche_roule_a_zero():
+    """Sans averse, les cumuls restent publiés et valent zéro.
+
+    C'est le cas qui faisait disparaître les capteurs : une cellule vide
+    sur un relevé déciminuté ne doit pas effacer les cumuls de l'heure fixe.
+    """
+    obs = parse_station_page(load_fixture("station_pluie_seche.html"))
+
+    assert obs.data["pluie_1h"] == 0.0
+    assert obs.data["pluie_24h"] == 0.2
+    assert obs.data["pluie_instantannee"] == 0.0
+    assert obs.data["pluie_cumul_intervalle"] == 0.0

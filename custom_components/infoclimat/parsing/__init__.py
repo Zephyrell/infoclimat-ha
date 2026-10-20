@@ -58,7 +58,6 @@ __all__ = [
     "decode_page",
     "EXPECTED_FIELDS",
     "CORE_FIELDS",
-    "SLOW_ROLES",
 ]
 
 #: Champs suivis dans le rapport de parsing.
@@ -69,6 +68,8 @@ EXPECTED_FIELDS: tuple[str, ...] = (
     "vent_rafale",
     "vent_direction",
     "pluie_1h",
+    "pluie_instantannee",
+    "pluie_intensite_max_1h",
     "pluie_3h",
     "pluie_6h",
     "pluie_12h",
@@ -90,15 +91,14 @@ EXPECTED_FIELDS: tuple[str, ...] = (
 #: Un relevé est considéré exploitable si au moins un de ces champs est lu.
 CORE_FIELDS: tuple[str, ...] = ("temperature", "humidite", "pression", "vent_moyen")
 
-#: Colonnes publiées moins souvent que la cadence des lignes.
-#: La pluviométrie n'est renseignée que sur les relevés horaires alors que la
-#: température l'est toutes les 10 minutes : sans report, le capteur
-#: « Pluie (1h) » serait vide la plupart du temps, y compris sous la pluie.
-SLOW_ROLES: tuple[str, ...] = ("pluie_1h",)
+#: Cumuls que le site ne publie que sur ses lignes horaires. Les relevés
+#: déciminutés qui suivent n'en donnent que leurs incréments.
+RAIN_WINDOWS: tuple[int, ...] = (3, 6, 12, 24)
 
-#: Au-delà de ce délai, un cumul **positif** n'est plus d'actualité. Un cumul
-#: nul, lui, reste valable jusqu'à la prochaine averse.
-SLOW_VALUE_MAX_AGE = timedelta(hours=1)
+#: Au-delà de ce délai, le cumul de la dernière heure fixe ne décrit plus la
+#: fenêtre en cours : on ne l'étend pas avec les relevés déciminutés (les
+#: trous de publication rendraient l'estimation fausse).
+RAIN_BASE_MAX_AGE = timedelta(hours=1)
 
 
 class InfoclimatParseError(Exception):
@@ -210,8 +210,8 @@ def parse_station_page(html: str) -> StationObservation:
     # 6. Extraire les champs de la ligne retenue.
     data = _extract_row(cells, columns, report)
 
-    # 7. Reporter les colonnes à cadence lente depuis les relevés précédents.
-    _carry_slow_fields(rows, columns, index, moment, data, report)
+    # 7. Reconstituer les cumuls de pluie jusqu'au relevé choisi.
+    _derive_rain_totals(rows, columns, index, moment, data, report)
 
     # 8. Horodatage et identité de la station.
     data["heure_locale"] = moment.local
@@ -302,7 +302,7 @@ def _extract_row(
     return data
 
 
-def _carry_slow_fields(
+def _derive_rain_totals(
     rows: list[Node],
     columns: ColumnResolution,
     chosen_index: int,
@@ -310,51 +310,188 @@ def _carry_slow_fields(
     data: dict[str, Any],
     report: ParseReport,
 ) -> None:
-    """Reporte les mesures à cadence lente depuis les relevés précédents.
+    """Reconstitue les cumuls de pluie jusqu'au relevé choisi.
 
-    Exemple : à 11h30, la température est fraîche de quelques minutes mais la
-    pluviométrie date de 11h00. Sans report, « Pluie (1h) » serait inconnu
-    presque tout le temps.
+    Le site ne publie les cumuls 3/6/12/24 h que sur les lignes horaires
+    (``… mm/1h`` et son infobulle). Les lignes déciminutées, elles, ne portent
+    que le cumul de leurs dix dernières minutes. Sans recomposition, les
+    capteurs de cumul restent figés sur la dernière heure pile — ou
+    disparaissent dès que le relevé retenu n'est pas horaire.
+
+    Cumul sur N heures = valeur de la dernière ligne horaire + tous les
+    cumuls déciminutés postérieurs. La fenêtre déborde donc de moins d'une
+    heure ; c'est l'approximation retenue, faute de connaître l'incrément
+    sortant par le haut.
+
+    Pour l'heure écoulée en revanche, le calcul est exact : on additionne les
+    intervalles de dix minutes de la fenêtre, la ligne horaire contribuant
+    pour ses dix dernières minutes (lues dans l'infobulle, ``Pluie/10mn``).
     """
-    for role in SLOW_ROLES:
-        column = columns.index_of(role)
-        if column is None or data.get(role) is not None:
-            continue
+    column = columns.index_of("pluie_1h")
+    if column is None:
+        return
 
-        # Les lignes sont classées du plus récent au plus ancien : la
-        # première qui porte une mesure est la dernière connue.
-        for index in range(len(rows)):
-            cells = row_cells(rows[index])
-            if column >= len(cells):
-                continue
+    cells_by_row = [row_cells(row) for row in rows]
+    moments = [_row_time(cells, columns) for cells in cells_by_row]
+    produced = [
+        extract_role("pluie_1h", cells[column]) if column < len(cells) else {}
+        for cells in cells_by_row
+    ]
 
-            produced = extract_role(role, cells[column])
-            value = produced.get(role)
-            if value is None:
-                continue
+    # Une cellule vide signifie « pas de pluie sur l'intervalle » — mais
+    # seulement si la station a un pluviomètre. Une station sans capteur
+    # laisse toutes ses cellules vides, y compris celles des heures piles.
+    gauge = any(
+        item.get("pluie_cumul_intervalle") is not None
+        or any(f"pluie_{hours}h" in item for hours in RAIN_WINDOWS)
+        for item in produced
+    )
+    if not gauge:
+        return
 
-            if _is_carry_valid(value, rows[index], cells, columns, chosen_moment):
-                data.update(produced)
-                report.carried.append(role)
-            break  # aucune ligne plus ancienne ne serait plus fraîche
+    chosen = produced[chosen_index] if chosen_index < len(produced) else {}
+    chosen_amount = chosen.get("pluie_cumul_intervalle")
+    if chosen_amount is None:
+        # Ligne déciminutée sèche : le site laisse la cellule vide.
+        data["pluie_cumul_intervalle"] = 0.0
+
+    # Intensité instantanée : celle de la ligne retenue, ou zéro si la
+    # cellule est vide (il ne pleut pas).
+    if "pluie_instantannee" in chosen:
+        data["pluie_instantannee"] = chosen["pluie_instantannee"]
+    elif chosen_amount in (None, 0.0):
+        data["pluie_instantannee"] = 0.0
+
+    # Dernière ligne horaire — celle qui porte réellement un cumul sur 1 h.
+    hourly_index = None
+    for index in range(chosen_index, len(produced)):
+        item = produced[index]
+        if (
+            item.get("pluie_intervalle_min") == 60
+            and item.get("pluie_cumul_intervalle") is not None
+        ):
+            hourly_index = index
+            break
+
+    if hourly_index is not None:
+        _extend_from_hourly(
+            produced, moments, chosen_index, chosen_moment, hourly_index, data, report
+        )
+        return
+
+    # Aucune ligne horaire dans la page (station récente, page tronquée) :
+    # on peut encore sommer les intervalles de dix minutes de l'heure.
+    if chosen_moment.is_complete:
+        rolling = _sum_window(produced, moments, chosen_index, chosen_moment, 60)
+        if rolling is not None:
+            data["pluie_1h"] = rolling
 
 
-def _is_carry_valid(
-    value: float,
-    row: Node,
-    cells: list[Node],
-    columns: ColumnResolution,
+def _extend_from_hourly(
+    produced: list[dict[str, Any]],
+    moments: list[ObservationTime],
+    chosen_index: int,
     chosen_moment: ObservationTime,
-) -> bool:
-    """Un cumul nul reste valable ; un cumul positif expire au bout d'une heure."""
-    if value == 0:
-        return True
+    hourly_index: int,
+    data: dict[str, Any],
+    report: ParseReport,
+) -> None:
+    """Étend les cumuls de la dernière ligne horaire avec les 10 min suivantes."""
+    base = produced[hourly_index]
+    base_moment = moments[hourly_index]
 
-    row_moment = _row_time(cells, columns)
-    if not row_moment.is_complete or not chosen_moment.is_complete:
-        return False
-    age = chosen_moment.moment - row_moment.moment
-    return timedelta(0) <= age <= SLOW_VALUE_MAX_AGE
+    if not chosen_moment.is_complete or not base_moment.is_complete:
+        return
+    age = chosen_moment.moment - base_moment.moment
+    if not timedelta(0) <= age <= RAIN_BASE_MAX_AGE:
+        # Trop ancien : les trous de publication rendraient le total faux.
+        return
+
+    increment = 0.0
+    for index in range(chosen_index, hourly_index):
+        amount = produced[index].get("pluie_cumul_intervalle")
+        if amount is not None:
+            increment += amount
+    increment = round(increment, 2)
+
+    for hours in RAIN_WINDOWS:
+        base_value = base.get(f"pluie_{hours}h")
+        if base_value is not None:
+            data[f"pluie_{hours}h"] = round(base_value + increment, 2)
+
+    data["pluie_heure_fixe"] = base_moment.local or base_moment.utc
+    data["pluie_depuis_heure_fixe"] = increment
+
+    if hourly_index != chosen_index:
+        report.carried.append("pluie_1h")
+
+    rolling = _rolling_hour(produced, moments, chosen_index, chosen_moment, hourly_index)
+    if rolling is not None:
+        data["pluie_1h"] = rolling
+
+
+def _rolling_hour(
+    produced: list[dict[str, Any]],
+    moments: list[ObservationTime],
+    chosen_index: int,
+    chosen_moment: ObservationTime,
+    hourly_index: int,
+) -> float | None:
+    """Cumul exact des soixante dernières minutes, si les données suffisent."""
+    if hourly_index == chosen_index:
+        # Le relevé retenu est la ligne horaire : son cumul est par définition
+        # l'heure écoulée.
+        return produced[hourly_index].get("pluie_cumul_intervalle")
+
+    # Station qui ne publie la pluie qu'à l'heure : aucun incrément
+    # déciminuté à ajouter, on reprend le cumul horaire tel quel.
+    deciminute = any(
+        produced[index].get("pluie_intervalle_min") == 10
+        and produced[index].get("pluie_cumul_intervalle") is not None
+        for index in range(hourly_index)
+    )
+    if not deciminute:
+        return produced[hourly_index].get("pluie_cumul_intervalle")
+
+    return _sum_window(produced, moments, chosen_index, chosen_moment, 60, hourly_index)
+
+
+def _sum_window(
+    produced: list[dict[str, Any]],
+    moments: list[ObservationTime],
+    chosen_index: int,
+    chosen_moment: ObservationTime,
+    minutes: int,
+    hourly_index: int | None = None,
+) -> float | None:
+    """Somme des cumuls d'intervalle sur les ``minutes`` précédant le relevé.
+
+    La ligne horaire ne contribue que pour ses dix dernières minutes
+    (``Pluie/10mn``) : le reste de son heure sort de la fenêtre ou est
+    déjà couvert par les lignes déciminutées.
+    """
+    start = chosen_moment.moment - timedelta(minutes=minutes)
+    total = 0.0
+    seen = False
+
+    for index in range(chosen_index, len(produced)):
+        moment = moments[index]
+        if not moment.is_complete:
+            # Ligne intercalaire sans horodatage : elle ne porte pas de pluie.
+            continue
+        if moment.moment <= start:
+            break
+        seen = True
+        if index == hourly_index:
+            chunk = produced[index].get("pluie_10mn")
+            if chunk is not None:
+                total += chunk
+        else:
+            amount = produced[index].get("pluie_cumul_intervalle")
+            if amount is not None:
+                total += amount
+
+    return round(total, 2) if seen else None
 
 
 # ──────────────────────────── Annexes ────────────────────────────
